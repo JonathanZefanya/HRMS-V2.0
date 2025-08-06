@@ -2,142 +2,55 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Utility;
-use Illuminate\Http\Request;
+use App\Helper\Reply;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Session;
 
 class ImportController extends Controller
 {
-    public function getTableWiseFields($table)
+
+    /**
+     * Get import progress percentage
+     * @param mixed $id
+     * @return mixed
+     */
+    public function getImportProgress($name, $id)
     {
-        $error = '';
-        switch ($table) {
-            case 'attendance_employees':
-                $extraFields = ['id', 'status', 'late', 'early_leaving', 'overtime', 'total_rest', 'created_by', 'created_at', 'updated_at'];
-                $tableFields = Utility::getTableFields($table, $extraFields);
-                if ($tableFields['status']) {
-                    if (($key = array_search('employee_id', $tableFields['data'])) !== false) {
-                        $tableFields['data'][$key] = 'employee_email';
-                    }
-                    $route = "attendance.import.data";
-                }
-                break;
-            case 'time_sheets':
-                $extraFields = ['id', 'created_by', 'created_at', 'updated_at'];
-                $tableFields = Utility::getTableFields($table, $extraFields);
-                if ($tableFields['status']) {
-                    if (($key = array_search('employee_id', $tableFields['data'])) !== false) {
-                        $tableFields['data'][$key] = 'employee_email';
-                    }
-                    $route = "timesheet.import.data";
-                }
-                break;
-            case 'holidays':
-                $extraFields = ['id', 'created_by', 'created_at', 'updated_at'];
-                $tableFields = Utility::getTableFields($table, $extraFields);
-                if ($tableFields['status']) {
-                    $desiredOrder = ['occasion', 'start_date', 'end_date'];
-                    $tableFields['data'] = array_values(array_intersect($desiredOrder, $tableFields['data']));
-                    $route = "holidays.import.data";
-                }
-                break;
-            case 'assets':
-                $extraFields = ['id', 'created_by', 'created_at', 'updated_at'];
-                $tableFields = Utility::getTableFields($table, $extraFields);
-                if ($tableFields['status']) {
-                    if (($key = array_search('employee_id', $tableFields['data'])) !== false) {
-                        $tableFields['data'][$key] = 'employee_email';
-                    }
-                    $route = "assets.import.data";
-                }
-                break;
+        // Get Count of Execution of Jobs
+        $execution_jobs = (int)(ini_get('max_execution_time') / 10);
 
-                //==========================================================
+        // Execute Jobs
+        Artisan::call('queue:work database  --max-jobs='. ($execution_jobs > 1 ? $execution_jobs : 1)  . ' --queue=' . $name . ' --stop-when-empty');
 
-            default:
-                $error = 'Something went wrong!';
-                $tableFields['status'] = false;
-                break;
+        $batch = Bus::findBatch($id);
+        $progress = 0;
+        $failedJobs = 0;
+        $processedJobs = 0;
+        $pendingJobs = 0;
+        $totalJobs = 0;
+
+        if ($batch) {
+            $failedJobs = $batch->failedJobs;
+            $pendingJobs = $batch->pendingJobs;
+            $totalJobs = $batch->totalJobs;
+            $processedJobs = $batch->processedJobs();
+
+            $progress = $totalJobs > 0 ? round((($processedJobs + $failedJobs) / $totalJobs) * 100, 2) : 0;
         }
 
-        if ($tableFields['status']) {
-            $fields = $tableFields['data'];
-        } else {
-            $error = $tableFields['message'];
-        }
-        return [
-            'route' => $route,
-            'fields' => $fields,
-            'error' => $error,
-        ];
+        return Reply::dataOnly(['progress' => $progress, 'failedJobs' => $failedJobs, 'processedJobs' => $processedJobs, 'pendingJobs' => $pendingJobs, 'totalJobs' => $totalJobs]);
     }
 
-    public function fileImportModal(Request $request)
+    public function getQueueException($name)
     {
-        $fields = [];
-        $route  = '';
-        $tableFields = $this->getTableWiseFields($request->table);
-        if ($tableFields['error'] != '') {
-            $error = $tableFields['error'];
-        } else {
-            $fields = json_encode($tableFields['fields']);
-            $route = $tableFields['route'];
-        }
+        $exceptions = DB::table('failed_jobs')
+            ->where('queue', $name)
+            ->get();
 
-        return view('import.import_modal', compact('fields', 'route'));
+        $view = view('import.import_exception', $this->data)->with(['exceptions' => $exceptions])->render();
+        return Reply::dataOnly(['view' => $view, 'count' => count($exceptions)]);
     }
 
-    public function fileImport(Request $request)
-    {
-        session_start();
-
-        $error = '';
-
-        $html = '';
-
-        $fields = [];
-        $route = '';
-
-        if ($request->hasFile('file') && $request->file->getClientOriginalName() != '') {
-            $file_array = explode(".", $request->file->getClientOriginalName());
-
-            $extension = end($file_array);
-            if ($extension == 'csv') {
-                $file_data = fopen($request->file->getRealPath(), 'r');
-                $file_header = fgetcsv($file_data);
-
-                $tableFields = $this->getTableWiseFields($request->table);
-                if ($tableFields['error'] != '') {
-                    $error = $tableFields['error'];
-                } else {
-                    $fields = $tableFields['fields'];
-                }
-
-                $limit = 0;
-                $temp_data = [];
-                while (($row = fgetcsv($file_data)) !== false) {
-                    $limit++;
-                    $html .= '<tr>';
-                    for ($count = 0; $count < count($row); $count++) {
-                        $html .= '<td>' . $row[$count] . '</td>';
-                    }
-                    $html .= '</tr>';
-                    $temp_data[] = $row;
-                }
-
-                $_SESSION['file_data'] = $temp_data;
-            } else {
-                $error = 'Only <b>.csv</b> file allowed';
-            }
-        } else {
-
-            $error = 'Please Select CSV File';
-        }
-        $output = array(
-            'error' => $error,
-            'output' => $html,
-            'fields' => $fields,
-        );
-
-        return json_encode($output);
-    }
 }

@@ -1,197 +1,157 @@
-@extends('layouts.auth')
-@section('page-title')
-    {{ __('Register') }}
-@endsection
-@section('language-bar')
-    @php
-        $languages = App\Models\Utility::languages();
+<x-auth>
+    <form id="login-form" action="{{ route('login') }}" class="ajax-form" method="POST">
+        {{ csrf_field() }}
+        <h3 class=" mb-4 f-w-500">@lang('app.signUpAsClient')</h3>
 
-        $lang = \App::getLocale('lang');
-        $LangName = \App\Models\Languages::where('code', $lang)->first();
-        if (empty($LangName)) {
-            $LangName = new App\Models\Utility();
-            $LangName->fullName = 'English';
-        }
-
-        $settings = App\Models\Utility::settings();
-        config([
-            'captcha.sitekey' => $settings['google_recaptcha_key'],
-            'captcha.secret' => $settings['google_recaptcha_secret'],
-            'options' => [
-                'timeout' => 30,
-            ],
-        ]);
-
-        $keyArray = [];
-        if (is_array(json_decode($setting['menubar_page'])) || is_object(json_decode($setting['menubar_page']))) {
-            foreach (json_decode($setting['menubar_page']) as $key => $value) {
-                if (
-                    in_array($value->menubar_page_name, ['Terms and Conditions']) ||
-                    in_array($value->menubar_page_name, ['Privacy Policy'])
-                ) {
-                    $keyArray[] = $value->menubar_page_name;
-                }
-            }
-        }
-
-    @endphp
-    <div class="lang-dropdown-only-desk">
-        <li class="dropdown dash-h-item drp-language">
-            <a class="dash-head-link dropdown-toggle btn" href="#" data-bs-toggle="dropdown" aria-expanded="false">
-                <span class="drp-text"> {{ ucfirst($LangName->fullName) }}
-                </span>
-            </a>
-            <div class="dropdown-menu dash-h-dropdown dropdown-menu-end">
-                @foreach ($languages as $code => $language)
-                    <a href="{{ route('register', [$ref, $plan_id, $code]) }}" tabindex="0"
-                        class="dropdown-item {{ $code == $lang ? 'active' : '' }}">
-                        <span>{{ ucFirst($language) }}</span>
-                    </a>
-                @endforeach
-            </div>
-        </li>
-    </div>
-@endsection
-
-@if ($settings['cust_darklayout'] == 'on')
-    <style>
-        .g-recaptcha {
-            filter: invert(1) hue-rotate(180deg) !important;
-        }
-    </style>
-@endif
-@section('content')
-    <div class="card-body">
-        @if (session('status'))
-            <div class="mb-4 font-medium text-lg text-green-600 text-danger">
-                {{ __('Email SMTP settings does not configured so please contact to your site admin.') }}
+        @if ($errors->any())
+            <div class="alert alert-danger">
+                <ul>
+                    @foreach ($errors->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
             </div>
         @endif
-        {{ Form::open(['route' => 'register', 'method' => 'post', 'id' => 'loginForm', 'class' => 'needs-validation', 'novalidate']) }}
-        <div class="">
-            <h2 class="mb-3 f-w-600">{{ __('Register') }}</h2>
+
+        <div class="form-group text-left">
+            <label for="name">@lang('app.name') <sup class="f-14 mr-1">*</sup></label>
+            <input type="text" tabindex="1" name="name"
+                   class="form-control height-50 f-15 light_text"
+                   placeholder="@lang('placeholders.name')" id="name" autofocus>
         </div>
-        <div class="custom-login-form">
-            <div class="form-group mb-3">
-                <label class="form-label">{{ __('Full Name') }}</label>
-                <input id="name" type="text" class="form-control" name="name"
-                    placeholder="{{ __('Enter Full Name') }}" required autofocus>
-                @error('name')
-                    <span class="error invalid-email text-danger" role="alert">
-                        <small>{{ $message }}</small>
-                    </span>
-                @enderror
-            </div>
-            <div class="form-group mb-3">
-                <label class="form-label">{{ __('Email') }}</label>
-                <input id="email" type="email" class="form-control  @error('email') is-invalid @enderror"
-                    name="email" placeholder="{{ __('Enter your email') }}" required autofocus>
-                @error('email')
-                    <span class="error invalid-email text-danger" role="alert">
-                        <small>{{ $message }}</small>
-                    </span>
-                @enderror
-            </div>
-            <div class="form-group mb-3 pss-field">
-                <label class="form-label">{{ __('Password') }}</label>
-                <input id="password" type="password" class="form-control  @error('password') is-invalid @enderror"
-                    name="password" placeholder="{{ __('Enter Password') }}" required>
-                @error('password')
-                    <span class="error invalid-password text-danger" role="alert">
-                        <small>{{ $message }}</small>
-                    </span>
-                @enderror
-            </div>
-            <div class="form-group mb-3 pss-field">
-                <label class="form-label">{{ __('Confirm password') }}</label>
-                <input id="confirm-password" type="password" class="form-control" name="password_confirmation"
-                    placeholder="{{ __('Enter Confirm Password') }}" required>
-                @error('password_confirmation')
-                    <span class="error invalid-password_confirmation text-danger" role="alert">
-                        <small>{{ $message }}</small>
-                    </span>
-                @enderror
-            </div>
 
-            @if (isset($settings['recaptcha_module']) && $settings['recaptcha_module'] == 'yes')
-                @if (isset($settings['google_recaptcha_version']) && $settings['google_recaptcha_version'] == 'v2-checkbox')
-                    <div class="form-group mb-4">
-                        {!! NoCaptcha::display() !!}
-                        @error('g-recaptcha-response')
-                            <span class="error small text-danger" role="alert">
-                                <strong>{{ $message }}</strong>
-                            </span>
-                        @enderror
-                    </div>
-                @else
-                    <div class="form-group mb-4">
-                        <input type="hidden" id="g-recaptcha-response" name="g-recaptcha-response" class="form-control">
-                        @error('g-recaptcha-response')
-                            <span class="error small text-danger" role="alert">
-                                <strong>{{ $message }}</strong>
-                            </span>
-                        @enderror
-                    </div>
-                @endif
-            @endif
-
-            @if (count($keyArray) > 0)
-                <div class="form-check custom-checkbox">
-                    <input type="checkbox" class="form-check-input" id="termsCheckbox" name="terms_condition_check"
-                        required>
-                    <label class="form-check-label text-sm" for="termsCheckbox">{{ __('I agree to the ') }}
-                        @if (is_array(json_decode($setting['menubar_page'])) || is_object(json_decode($setting['menubar_page'])))
-                            @foreach (json_decode($setting['menubar_page']) as $key => $value)
-                                @if (in_array($value->menubar_page_name, ['Terms and Conditions']) && isset($value->template_name))
-                                    <a href="{{ $value->template_name == 'page_content' ? route('custom.page', $value->page_slug) : $value->page_url }}"
-                                        target="_blank">{{ $value->menubar_page_name }}</a>
-                                @endif
-                            @endforeach
-                            @if (count($keyArray) == 2)
-                                {{ __('and the ') }}
-                            @endif
-                            @foreach (json_decode($setting['menubar_page']) as $key => $value)
-                                @if (in_array($value->menubar_page_name, ['Privacy Policy']) && isset($value->template_name))
-                                    <a href="{{ $value->template_name == 'page_content' ? route('custom.page', $value->page_slug) : $value->page_url }}"
-                                        target="_blank">{{ $value->menubar_page_name }}</a>
-                                @endif
-                            @endforeach
-                        @endif
-                    </label>
-                </div>
-            @endif
-
-            <div class="d-grid">
-                <input type="hidden" name="ref_code" value="{{ $ref }}">
-                <input type="hidden" name="plan_id" value="{{ $plan_id }}">
-                <button class="btn btn-primary mt-2" type="submit">
-                    {{ __('Register') }}
-                </button>
-            </div>
-            </form>
-            <p class="my-4 text-center">{{ __('Already have an account?') }}
-                <a href="{{ route('login', $lang) }}" tabindex="0">{{ __('Login') }}</a>
-            </p>
+        <div class="form-group text-left">
+            <label for="email">@lang('auth.email') <sup class="f-14 mr-1">*</sup></label>
+            <input tabindex="2" type="email" name="email"
+                   class="form-control height-50 f-15 light_text"
+                   placeholder="@lang('placeholders.email')" id="email">
+            <input type="hidden" id="g_recaptcha" name="g_recaptcha">
         </div>
-    </div>
-@endsection
-@push('custom-scripts')
-    @if (isset($settings['recaptcha_module']) && $settings['recaptcha_module'] == 'yes')
-        @if (isset($settings['google_recaptcha_version']) && $settings['google_recaptcha_version'] == 'v2-checkbox')
-            {!! NoCaptcha::renderJs() !!}
-        @else
-            <script src="https://www.google.com/recaptcha/api.js?render={{ $settings['google_recaptcha_key'] }}"></script>
+
+        <div class="form-group text-left">
+            <label for="password">@lang('app.password') <sup class="f-14 mr-1">*</sup></label>
+            <x-forms.input-group>
+                <input type="password" name="password" id="password"
+                       placeholder="@lang('placeholders.password')" tabindex="3"
+                       class="form-control height-50 f-15 light_text">
+                <x-slot name="append">
+                    <button type="button" tabindex="4" data-toggle="tooltip"
+                            data-original-title="@lang('app.viewPassword')"
+                            class="btn btn-outline-secondary border-grey height-50 toggle-password">
+                        <i
+                            class="fa fa-eye"></i></button>
+                </x-slot>
+            </x-forms.input-group>
+        </div>
+
+        <div class="form-group text-left">
+            <label for="company_name">@lang('modules.client.companyName')</label>
+            <input type="text" tabindex="5" name="company_name"
+                   class="form-control height-50 f-15 light_text"
+                   placeholder="@lang('placeholders.company')" id="company_name">
+        </div>
+
+        @if ($globalSetting->google_recaptcha_status == 'active' && $globalSetting->google_recaptcha_v2_status == 'active')
+            <div class="form-group" id="captcha_container"></div>
+        @endif
+
+        @if ($errors->has('g-recaptcha-response'))
+            <div class="help-block with-errors">{{ $errors->first('g-recaptcha-response') }}
+            </div>
+        @endif
+
+        @if ($globalSetting->sign_up_terms == 'yes')
+            <div class="form-group text-left" >
+                <input autocomplete="off" id="read_agreement"
+                    name="terms_and_conditions" type="checkbox" >
+                <label for="read_agreement">@lang('app.acceptTerms') <a href="{{ $globalSetting->terms_link }}" target="_blank" id="terms_link" >@lang('app.termsAndCondition')</a></label>
+            </div>
+        @endif
+
+        <button type="button" id="submit-register"
+                class="btn-primary f-w-500 rounded w-100 height-50 f-18">
+            @lang('app.signUp') <i class="fa fa-arrow-right pl-1"></i>
+        </button>
+
+        <a href="{{ route('login') }}"
+           class="btn-secondary f-w-500 rounded w-100 height-50 f-15 mt-3">
+            @lang('app.login')
+        </a>
+        <input type="hidden" name="locale" value="{{ session()->has('locale') ? session('locale') : global_setting()->locale }}">
+    </form>
+
+    <x-slot name="scripts">
+        @if ($globalSetting->google_recaptcha_status == 'active' && $globalSetting->google_recaptcha_v2_status == 'active')
+            <script src="https://www.google.com/recaptcha/api.js?onload=onloadCallback&render=explicit" async
+                    defer></script>
             <script>
-                $(document).ready(function() {
-                    grecaptcha.ready(function() {
-                        grecaptcha.execute('{{ $settings['google_recaptcha_key'] }}', {
-                            action: 'submit'
-                        }).then(function(token) {
-                            $('#g-recaptcha-response').val(token);
-                        });
+                var gcv3;
+                var onloadCallback = function () {
+                    // Renders the HTML element with id 'captcha_container' as a reCAPTCHA widget.
+                    // The id of the reCAPTCHA widget is assigned to 'gcv3'.
+                    gcv3 = grecaptcha.render('captcha_container', {
+                        'sitekey': '{{ $globalSetting->google_recaptcha_v2_site_key }}',
+                        'theme': 'light',
+                        'callback': function (response) {
+                            if (response) {
+                                $('#g_recaptcha').val(response);
+                            }
+                        },
+                    });
+                };
+            </script>
+        @endif
+        @if ($globalSetting->google_recaptcha_status == 'active' && $globalSetting->google_recaptcha_v3_status == 'active')
+            <script
+                src="https://www.google.com/recaptcha/api.js?render={{ $globalSetting->google_recaptcha_v3_site_key }}"></script>
+            <script>
+                grecaptcha.ready(function () {
+                    grecaptcha.execute('{{ $globalSetting->google_recaptcha_v3_site_key }}').then(function (token) {
+                        // Add your logic to submit to your backend server here.
+                        $('#g_recaptcha').val(token);
                     });
                 });
             </script>
         @endif
-    @endif
-@endpush
+
+        <script>
+            $(document).ready(function () {
+
+                $('#submit-register').click(function () {
+
+                    const url = "{{ route('register') }}";
+
+                    $.easyAjax({
+                        url: url,
+                        container: '.login_box',
+                        disableButton: true,
+                        buttonSelector: "#submit-register",
+                        type: "POST",
+                        blockUI: true,
+                        data: $('#login-form').serialize(),
+                        success: function (response) {
+                            window.location.href = "{{ route('dashboard') }}";
+                        }
+                    })
+                });
+
+                @if (session('message'))
+                Swal.fire({
+                    icon: 'error',
+                    text: '{{ session('message') }}',
+                    showConfirmButton: true,
+                    customClass: {
+                        confirmButton: 'btn btn-primary',
+                    },
+                    showClass: {
+                        popup: 'swal2-noanimation',
+                        backdrop: 'swal2-noanimation'
+                    },
+                })
+                @endif
+
+            });
+        </script>
+    </x-slot>
+
+</x-auth>

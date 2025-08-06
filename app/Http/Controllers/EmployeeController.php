@@ -2,1174 +2,1232 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Branch;
-use App\Models\Department;
+use App\DataTables\EmployeesDataTable;
+use App\DataTables\LeaveDataTable;
+use App\DataTables\ProjectsDataTable;
+use App\DataTables\TasksDataTable;
+use App\DataTables\TicketDataTable;
+use App\DataTables\TimeLogsDataTable;
+use App\Enums\Salutation;
+use App\Helper\Files;
+use App\Helper\Reply;
+use App\Http\Requests\Admin\Employee\ImportProcessRequest;
+use App\Http\Requests\Admin\Employee\ImportRequest;
+use App\Http\Requests\Admin\Employee\StoreRequest;
+use App\Http\Requests\Admin\Employee\UpdateRequest;
+use App\Http\Requests\User\CreateInviteLinkRequest;
+use App\Http\Requests\User\InviteEmailRequest;
+use App\Imports\EmployeeImport;
+use App\Models\ModuleSetting;
+use App\Jobs\ImportEmployeeJob;
+use App\Models\Appreciation;
+use App\Models\Attendance;
+use App\Models\AutomateShift;
 use App\Models\Designation;
-use App\Models\Document;
-use App\Models\Employee;
-use App\Models\EmployeeDocument;
-use App\Mail\UserCreate;
-use App\Models\Plan;
+use App\Models\EmployeeActivity;
+use App\Models\EmployeeDetails;
+use App\Models\EmployeeSkill;
+use App\Models\LanguageSetting;
+use App\Models\Leave;
+use App\Models\LeaveType;
+use App\Models\Module;
+use App\Models\Notification;
+use App\Models\Passport;
+use App\Models\ProjectTimeLog;
+use App\Models\ProjectTimeLogBreak;
+use App\Models\Role;
+use App\Models\RoleUser;
+use App\Models\Skill;
+use App\Models\Task;
+use App\Models\TaskboardColumn;
+use App\Models\Team;
+use App\Models\Ticket;
+use App\Models\UniversalSearch;
 use App\Models\User;
-use App\Models\Utility;
-use File;
+use App\Models\UserInvitation;
+use App\Models\VisaDetail;
+use App\Scopes\ActiveScope;
+use App\Traits\ImportExcel;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
-use App\Models\JoiningLetter;
-use App\Imports\EmployeesImport;
-use App\Exports\EmployeesExport;
-use App\Models\Contract;
-use App\Models\ExperienceCertificate;
-use App\Models\LoginDetail;
-use Maatwebsite\Excel\Facades\Excel;
-use App\Models\NOC;
-use App\Models\PaySlip;
-use App\Models\Termination;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
+use Symfony\Component\Mailer\Exception\TransportException;
+use App\Models\CompanyAddress;
+use App\Models\Promotion;
+use App\Models\ShiftRotation;
+use Modules\Payroll\Entities\EmployeeMonthlySalary;
+use Modules\Payroll\Entities\PayrollSetting;
 
-//use Faker\Provider\File;
-
-class EmployeeController extends Controller
+class EmployeeController extends AccountBaseController
 {
+
+    use ImportExcel;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->pageTitle = 'app.menu.employees';
+        $this->middleware(function ($request, $next) {
+            abort_403(!in_array('employees', $this->user->modules));
+
+            return $next($request);
+        });
+    }
+
     /**
-     * Display a listing of the resource.
+     * @param EmployeesDataTable $dataTable
+     * @return mixed|void
+     */
+    public function index(EmployeesDataTable $dataTable)
+    {
+        $viewPermission = user()->permission('view_employees');
+
+        abort_403(!in_array($viewPermission, ['all', 'added', 'owned', 'both']));
+
+        if (!request()->ajax()) {
+            $this->employees = User::allEmployees();
+            $this->skills = Skill::all();
+            $this->departments = Team::all();
+            $this->designations = Designation::allDesignations();
+            $this->totalEmployees = count($this->employees);
+            $this->roles = Role::where('name', '<>', 'client')->orderBy('id')->get();
+        }
+
+        return $dataTable->render('employees.index', $this->data);
+    }
+
+    /**
+     * XXXXXXXXXXX
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
-    {
-
-        if (\Auth::user()->can('Manage Employee')) {
-            if (Auth::user()->type == 'employee') {
-                $employees = Employee::where('user_id', '=', Auth::user()->id)->get();
-            } else {
-                $employees = Employee::where('created_by', \Auth::user()->creatorId())->with(['branch', 'department', 'designation', 'user'])->get();
-            }
-
-            return view('employee.index', compact('employees'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
     public function create()
     {
-        if (\Auth::user()->can('Create Employee')) {
-            $company_settings = Utility::settings();
-            $documents        = Document::where('created_by', Auth::user()->creatorId())->get();
-            $branches         = Branch::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $departments      = Department::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $designations     = Designation::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $employees        = User::where('created_by', Auth::user()->creatorId())->get();
-            $employeesId      = Auth::user()->employeeIdFormat($this->employeeNumber());
+        $this->pageTitle = __('app.addEmployee');
 
-            return view('employee.create', compact('employees', 'employeesId', 'departments', 'designations', 'documents', 'branches', 'company_settings'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        $addPermission = user()->permission('add_employees');
+        abort_403(!in_array($addPermission, ['all', 'added']));
+
+
+        $this->teams = Team::all();
+        $this->designations = Designation::allDesignations();
+
+        $this->skills = Skill::all()->pluck('name')->toArray();
+        $this->countries = countries();
+        $this->lastEmployeeID = EmployeeDetails::count();
+        $this->checkifExistEmployeeId = EmployeeDetails::select('id')->where('employee_id', ($this->lastEmployeeID + 1))->first();
+        $this->employees = User::allEmployees(null, true);
+        $this->languages = LanguageSetting::where('status', 'enabled')->get();
+        $this->salutations = Salutation::cases();
+        $this->companyAddresses = CompanyAddress::all();
+
+        $userRoles = user()->roles->pluck('name')->toArray();
+
+        if (in_array('admin', $userRoles)) {
+            $this->roles = Role::where('name', '<>', 'client')->get();
         }
+        else {
+            $this->roles = Role::whereNotIn('name', ['admin', 'client'])->get();
+        }
+
+        $employee = new EmployeeDetails();
+        $getCustomFieldGroupsWithFields = $employee->getCustomFieldGroupsWithFields();
+
+        if ($getCustomFieldGroupsWithFields) {
+            $this->fields = $getCustomFieldGroupsWithFields->fields;
+        }
+
+        $this->view = 'employees.ajax.create';
+
+        if (request()->ajax()) {
+            $html = view($this->view, $this->data)->render();
+
+            return Reply::dataOnly(['status' => 'success', 'html' => $html, 'title' => $this->pageTitle]);
+        }
+
+        return view('employees.create', $this->data);
+
     }
 
-    public function store(Request $request)
+    public function getExitDateMessage(Request $request)
     {
-        if (\Auth::user()->can('Create Employee')) {
+        $lastDate = $request->input('last_date');
+        $lastDate = Carbon::parse($lastDate);
+        $today = Carbon::now()->startOfDay();
+        $tomorrow = Carbon::now()->addDay();
+        $isExitDate = $request->input('is_exit_date');
 
-            $rules = [
-                'name' => 'required|max:120',
-                'dob' => 'before:' . date('Y-m-d'),
-                'gender' => 'required',
-                'phone' => 'required',
-                'address' => 'required',
-                'email' => 'required|unique:users|email|max:100',
-                'password' => 'required',
-                'branch_id' => 'required',
-                'department_id' => 'required',
-                'designation_id' => 'required',
-                'document.*' => 'required',
-            ];
-            // $rules['biometric_emp_id'] = [
-            //     'required',
-            //     Rule::unique('employees')->where(function ($query) {
-            //         return $query->where('created_by', Auth::user()->creatorId());
-            //     })
-            // ];
-
-            $validator = \Validator::make(
-                $request->all(),
-                $rules
-            );
-
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
-
-                return redirect()->back()->withInput()->with('error', $messages->first());
-            }
-
-            $objUser        = User::find(\Auth::user()->creatorId());
-            $total_employee = $objUser->countEmployees();
-            $plan           = Plan::find($objUser->plan);
-            $date = date("Y-m-d H:i:s");
-            $default_language = DB::table('settings')->select('value')->where('name', 'default_language')->where('created_by', \Auth::user()->creatorId())->first();
-
-            // new company default language
-            if ($default_language == null) {
-                $default_language = DB::table('settings')->select('value')->where('name', 'default_language')->first();
-            }
-
-            if ($request->hasFile('document')) {
-                foreach ($request->document as $key => $document) {
-
-                    $image_size = $request->file('document')[$key]->getSize();
-                    $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-
-                    if ($result == 1) {
-                        $filenameWithExt = $request->file('document')[$key]->getClientOriginalName();
-                        $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                        $extension       = $request->file('document')[$key]->getClientOriginalExtension();
-                        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                        $dir             = 'uploads/document/';
-
-                        $image_path      = $dir . $fileNameToStore;
-
-                        $path = \App\Models\Utility::upload_coustom_file($request, 'document', $fileNameToStore, $dir, $key, []);
-
-                        if ($path['flag'] == 1) {
-                            $url = $path['url'];
-                        } else {
-                            return redirect()->back()->with('error', __($path['msg']));
-                        }
-                    }
-                }
-            }
-
-            if ($total_employee < $plan->max_employees || $plan->max_employees == -1) {
-
-                $user = User::create(
-                    [
-                        'name' => $request['name'],
-                        'email' => $request['email'],
-                        'password' => Hash::make($request['password']),
-                        'type' => 'employee',
-                        'lang' => !empty($default_language) ? $default_language->value : 'en',
-                        'created_by' => \Auth::user()->creatorId(),
-                        'email_verified_at' => $date,
-                    ]
-                );
-                $user->save();
-                $user->assignRole('Employee');
-            } else {
-                return redirect()->back()->with('error', __('Your employee limit is over, Please upgrade plan.'));
-            }
-
-
-            if (!empty($request->document) && !is_null($request->document)) {
-                $document_implode = implode(',', array_keys($request->document));
-            } else {
-                $document_implode = null;
-            }
-
-
-            $employee = Employee::create(
-                [
-                    'user_id' => $user->id,
-                    'name' => $request['name'],
-                    'dob' => $request['dob'],
-                    'gender' => $request['gender'],
-                    'phone' => $request['phone'],
-                    'address' => $request['address'],
-                    'email' => $request['email'],
-                    'password' => Hash::make($request['password']),
-                    'employee_id' => $this->employeeNumber(),
-                    // 'biometric_emp_id' => !empty($request['biometric_emp_id']) ? $request['biometric_emp_id'] : '',
-                    'branch_id' => $request['branch_id'],
-                    'department_id' => $request['department_id'],
-                    'designation_id' => $request['designation_id'],
-                    'company_doj' => $request['company_doj'],
-                    'documents' => $document_implode,
-                    'account_holder_name' => $request['account_holder_name'],
-                    'account_number' => $request['account_number'],
-                    'bank_name' => $request['bank_name'],
-                    'bank_identifier_code' => $request['bank_identifier_code'],
-                    'branch_location' => $request['branch_location'],
-                    'tax_payer_id' => $request['tax_payer_id'],
-                    'created_by' => \Auth::user()->creatorId(),
-                ]
-            );
-
-            if ($request->hasFile('document')) {
-                foreach ($request->document as $key => $document) {
-
-                    $image_size = $request->file('document')[$key]->getSize();
-                    $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-
-                    if ($result == 1) {
-                        $filenameWithExt = $request->file('document')[$key]->getClientOriginalName();
-                        $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                        $extension       = $request->file('document')[$key]->getClientOriginalExtension();
-                        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                        $dir             = 'uploads/document/';
-
-                        $image_path      = $dir . $fileNameToStore;
-
-                        $path = \App\Models\Utility::upload_coustom_file($request, 'document', $fileNameToStore, $dir, $key, []);
-
-                        if ($path['flag'] == 1) {
-                            $url = $path['url'];
-                        } else {
-                            return redirect()->back()->with('error', __($path['msg']));
-                        }
-                        $employee_document = EmployeeDocument::create(
-                            [
-                                'employee_id' => $employee['employee_id'],
-                                'document_id' => $key,
-                                'document_value' => $path['url'],
-                                'created_by' => \Auth::user()->creatorId(),
-                            ]
-                        );
-                        $employee_document->save();
-                    }
-                }
-            }
-            $setings = \App\Models\Utility::settings();
-            if ($setings['new_employee'] == 1) {
-                $department = Department::find($request['department_id']);
-                $branch = Branch::find($request['branch_id']);
-                $designation = Designation::find($request['designation_id']);
-                $uArr = [
-                    'employee_email' => $user->email,
-                    'employee_password' => $request->password,
-                    'employee_name' => $request['name'],
-                    'employee_branch' => !empty($branch->name) ? $branch->name : '',
-                    'employee_department' => !empty($department->name) ? $department->name : '',
-                    'employee_designation' => !empty($designation->name) ? $designation->name : '',
-                ];
-                $resp = \App\Models\Utility::sendEmailTemplate('new_employee', [$user->id => $user->email], $uArr);
-
-                return redirect()->route('employee.index')->with('success', __('Employee successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : '') . ((isset($result) && $result != 1) ? '<br> <span class="text-danger">' . $result . '</span>' : ''));
-            }
-            return redirect()->route('employee.index')->with('success', __('Employee successfully created.'));
+        if ($lastDate < $today) {
+            $message = __('messages.exitDateErrorForPast', ['date' => $tomorrow->format(company()->date_format)]);
+            $showMessage = true;
         } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+            $message = __('messages.exitDateErrorForFuture', ['date' => $lastDate->format(company()->date_format)]);
+
+            if($isExitDate  == 'false' && $lastDate >= $today){
+                $showMessage = false;
+            } else {
+                $showMessage = true;
+            }
+        }
+
+        return response()->json(['message' => $message, 'showMessage' => $showMessage]);
+    }
+
+    public function assignRole(Request $request)
+    {
+        $changeEmployeeRolePermission = user()->permission('change_employee_role');
+
+        abort_403($changeEmployeeRolePermission != 'all');
+
+        $userId = $request->userId;
+        $roleId = $request->role;
+        $employeeRole = Role::where('name', 'employee')->first();
+
+        $user = User::withoutGlobalScope(ActiveScope::class)->findOrFail($userId);
+
+        RoleUser::where('user_id', $user->id)->delete();
+        $user->roles()->attach($employeeRole->id);
+
+        if ($employeeRole->id != $roleId) {
+            $user->roles()->attach($roleId);
+        }
+
+        $user->assignUserRolePermission($roleId);
+
+        $userSession = new AppSettingController();
+        $userSession->deleteSessions([$user->id]);
+
+        cache()->forget('sidebar_user_perms_' . $user->id);
+
+        return Reply::success(__('messages.roleAssigned'));
+    }
+
+    /**
+     * @param StoreRequest $request
+     * @return array
+     * @throws \Froiden\RestAPI\Exceptions\RelatedResourceNotFoundException
+     */
+    public function store(StoreRequest $request)
+    {
+        $addPermission = user()->permission('add_employees');
+        abort_403(!in_array($addPermission, ['all', 'added']));
+
+        DB::beginTransaction();
+        try {
+            $user = new User();
+            $user->name = $request->name;
+            $user->email = $request->email;
+            $user->password = bcrypt($request->password);
+            $user->mobile = $request->mobile;
+            $user->country_id = $request->country;
+            $user->salutation = $request->salutation;
+            $user->country_phonecode = $request->country_phonecode;
+            $user->gender = $request->gender;
+            $user->locale = $request->locale;
+
+            if ($request->has('login')) {
+                $user->login = $request->login;
+            }
+
+            if ($request->has('email_notifications')) {
+                $user->email_notifications = $request->email_notifications ? 1 : 0;
+            }
+
+            if ($request->hasFile('image')) {
+                Files::deleteFile($user->image, 'avatar');
+                $user->image = Files::uploadLocalOrS3($request->image, 'avatar', 300);
+            }
+
+            if ($request->has('telegram_user_id')) {
+                $user->telegram_user_id = $request->telegram_user_id;
+            }
+
+            $user->save();
+
+            $tags = json_decode($request->tags);
+
+            if (!empty($tags)) {
+                foreach ($tags as $tag) {
+                    // check or store skills
+                    $skillData = Skill::firstOrCreate(['name' => $tag->value]);
+
+                    // Store user skills
+                    $skill = new EmployeeSkill();
+                    $skill->user_id = $user->id;
+                    $skill->skill_id = $skillData->id;
+                    $skill->save();
+                }
+            }
+
+            if ($user->id) {
+                $employee = new EmployeeDetails();
+                $employee->user_id = $user->id;
+                $this->employeeData($request, $employee);
+                $employee->save();
+
+                // To add custom fields data
+                if ($request->custom_fields_data) {
+                    $employee->updateCustomFieldData($request->custom_fields_data);
+                }
+            }
+
+            $employeeRole = Role::where('name', 'employee')->first();
+            $user->attachRole($employeeRole);
+
+            if ($employeeRole->id != $request->role) {
+                $otherRole = Role::where('id', $request->role)->first();
+                $user->attachRole($otherRole);
+            }
+
+            $user->assignUserRolePermission($request->role);
+            $this->logSearchEntry($user->id, $user->name, 'employees.show', 'employee');
+
+            // Commit Transaction
+            DB::commit();
+
+        } catch (TransportException $e) {
+            // Rollback Transaction
+            DB::rollback();
+
+            return Reply::error('Please configure SMTP details to add employee. Visit Settings -> notification setting to set smtp ' . $e->getMessage(), 'smtp_error');
+        } catch (\Exception $e) {
+            logger($e->getMessage());
+            // Rollback Transaction
+            DB::rollback();
+
+            return Reply::error('Some error occurred when inserting the data. Please try again or contact support ' . $e->getMessage());
+        }
+
+
+        if (request()->add_more == 'true') {
+            $html = $this->create();
+
+            return Reply::successWithData(__('messages.recordSaved'), ['html' => $html, 'add_more' => true]);
+        }
+
+        return Reply::successWithData(__('messages.recordSaved'), ['redirectUrl' => route('employees.index')]);
+    }
+
+    /**
+     * @param Request $request
+     * @return array
+     */
+    public function applyQuickAction(Request $request)
+    {
+        switch ($request->action_type) {
+        case 'delete':
+            $this->deleteRecords($request);
+
+            return Reply::success(__('messages.deleteSuccess'));
+        case 'change-status':
+            $this->changeStatus($request);
+
+            return Reply::success(__('messages.updateSuccess'));
+        default:
+            return Reply::error(__('messages.selectAction'));
         }
     }
 
+    private function deleteEmployee(User $user)
+    {
+
+        $universalSearches = UniversalSearch::where('searchable_id', $user->id)->where('module_type', 'employee')->get();
+
+        if ($universalSearches) {
+            foreach ($universalSearches as $universalSearch) {
+                UniversalSearch::destroy($universalSearch->id);
+            }
+        }
+
+
+        Notification::whereNull('read_at')
+            ->where(function ($q) use ($user) {
+                $q->where('data', 'like', '{"id":' . $user->id . ',%');
+                $q->orWhere('data', 'like', '%,"name":' . $user->name . ',%');
+                $q->orWhere('data', 'like', '%,"user_one":' . $user->id . ',%');
+                $q->orWhere('data', 'like', '%,"user_id":' . $user->id . ',%');
+            })->delete();
+
+        $deleteSession = new AppSettingController();
+        $deleteSession->deleteSessions([$user->id]);
+        $user->delete();
+
+    }
+
+    protected function deleteRecords($request)
+    {
+        abort_403(user()->permission('delete_employees') != 'all');
+
+        $users = User::withoutGlobalScope(ActiveScope::class)->whereIn('id', explode(',', $request->row_ids))->get();
+
+        $users->each(function ($user) {
+            $this->deleteEmployee($user);
+        });
+    }
+
+    protected function changeStatus($request)
+    {
+        abort_403(user()->permission('edit_employees') != 'all');
+
+        $inactiveDate = $request->status == 'deactive' ? now() : null;
+
+        User::withoutGlobalScope(ActiveScope::class)->whereIn('id', explode(',', $request->row_ids))->update(['status' => $request->status, 'inactive_date' => $inactiveDate]);
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\Response
+     */
     public function edit($id)
     {
-        try {
-            $id = Crypt::decrypt($id);
-        } catch (\Throwable $th) {
-            return redirect()->back()->with('error', __('Employee Not Found.'));
-        }
-        if (\Auth::user()->can('Edit Employee')) {
-            $documents    = Document::where('created_by', \Auth::user()->creatorId())->get();
-            $branches     = Branch::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $departments  = Department::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $designations = Designation::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $employee     = Employee::find($id);
-            $employeesId  = \Auth::user()->employeeIdFormat($employee->employee_id);
+        $this->employee = User::withoutGlobalScope(ActiveScope::class)->with('employeeDetail', 'reportingTeam')->findOrFail($id);
 
-            return view('employee.edit', compact('employee', 'employeesId', 'branches', 'departments', 'designations', 'documents'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        $this->editPermission = user()->permission('edit_employees');
+
+        $userRoles = $this->employee->roles->pluck('name')->toArray();
+
+        abort_403(!in_array('admin', user_roles()) && in_array('admin', $userRoles));
+
+        abort_403(!($this->editPermission == 'all'
+            || ($this->editPermission == 'added' && $this->employee->employeeDetail->added_by == user()->id)
+            || ($this->editPermission == 'owned' && $this->employee->id == user()->id)
+            || ($this->editPermission == 'both' && ($this->employee->id == user()->id || $this->employee->employeeDetail->added_by == user()->id))
+        ));
+
+        $this->pageTitle = __('app.update') . ' ' . __('app.employee');
+        $this->skills = Skill::all()->pluck('name')->toArray();
+        $this->teams = Team::allDepartments();
+        $this->designations = Designation::allDesignations();
+        $this->countries = countries();
+        $this->languages = LanguageSetting::where('status', 'enabled')->get();
+        $exceptUsers = [$id];
+        $this->roles = Role::where('name', '<>', 'client')->get();
+        $this->userRoles = $this->employee->roles->pluck('name')->toArray();
+        $this->salutations = Salutation::cases();
+        $this->companyAddresses = CompanyAddress::all();
+
+        /** @phpstan-ignore-next-line */
+        if (count($this->employee->reportingTeam) > 0) {
+            /** @phpstan-ignore-next-line */
+            $exceptUsers = array_merge($this->employee->reportingTeam->pluck('user_id')->toArray(), $exceptUsers);
         }
+
+        $this->employees = User::allEmployees($exceptUsers, true);
+
+        if (!is_null($this->employee->employeeDetail)) {
+            $this->employeeDetail = $this->employee->employeeDetail->withCustomFields();
+
+            $getCustomFieldGroupsWithFields = $this->employeeDetail->getCustomFieldGroupsWithFields();
+
+            if ($getCustomFieldGroupsWithFields) {
+                $this->fields = $getCustomFieldGroupsWithFields->fields;
+            }
+        }
+
+        if (request()->ajax()) {
+            $html = view('employees.ajax.edit', $this->data)->render();
+
+            return Reply::dataOnly(['status' => 'success', 'html' => $html, 'title' => $this->pageTitle]);
+        }
+
+        $this->view = 'employees.ajax.edit';
+
+        return view('employees.create', $this->data);
+
     }
 
-    public function update(Request $request, $id)
+    /**
+     * @param UpdateRequest $request
+     * @param int $id
+     * @return array
+     * @throws \Froiden\RestAPI\Exceptions\RelatedResourceNotFoundException
+     * @throws \Illuminate\Contracts\Filesystem\FileNotFoundException
+     */
+    public function update(UpdateRequest $request, $id)
     {
-        if (\Auth::user()->can('Edit Employee')) {
 
-            $employee = Employee::findOrFail($id);
+        $user = User::withoutGlobalScope(ActiveScope::class)->findOrFail($id);
+        $user->name = $request->name;
+        $user->email = $request->email;
 
-            $rules = [
-                'name' => 'required',
-                'dob' => 'required',
-                'gender' => 'required',
-                'phone' => 'required',
-                'address' => 'required',
-            ];
-
-            // if ($request->has('biometric_emp_id') && $employee->biometric_emp_id != $request->biometric_emp_id) {
-            //     $rules['biometric_emp_id'] = [
-            //         'required',
-            //         Rule::unique('employees')->where(function ($query) {
-            //             return $query->where('created_by', Auth::user()->creatorId());
-            //         })
-            //     ];
-            // }
-
-            $validator = \Validator::make(
-                $request->all(),
-                $rules
-            );
-
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
-
-                return redirect()->back()->with('error', $messages->first());
-            }
-
-
-            if ($request->document) {
-
-                foreach ($request->document as $key => $document) {
-                    $employee_document = EmployeeDocument::where('employee_id', $employee->employee_id)->where('document_id', $key)->first();
-                    if (!empty($document)) {
-
-                        //storage limit
-                        $dir = 'uploads/document/';
-                        if (!empty($employee_document)) {
-                            $file_path = $dir . $employee_document->document_value;
-                        }
-                        $image_size = $request->file('document')[$key]->getSize();
-                        $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-
-                        if ($result == 1) {
-                            if (!empty($$file_path)) {
-                                Utility::changeStorageLimit(\Auth::user()->creatorId(), $file_path);
-                            }
-
-                            $filenameWithExt = $request->file('document')[$key]->getClientOriginalName();
-                            $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                            $extension       = $request->file('document')[$key]->getClientOriginalExtension();
-                            $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                            $dir             = 'uploads/document/';
-
-                            $image_path      = $dir . $fileNameToStore;
-
-                            $path = \App\Models\Utility::upload_coustom_file($request, 'document', $fileNameToStore, $dir, $key, []);
-                            if (!empty($employee_document)) {
-                                if ($employee_document->document_value) {
-                                    \File::delete(storage_path('uploads/document/' . $employee_document->document_value));
-                                }
-                                $employee_document->document_value = $fileNameToStore;
-                                $employee_document->save();
-                            } else {
-                                $employee_document                 = new EmployeeDocument();
-                                $employee_document->employee_id    = $employee->employee_id;
-                                $employee_document->document_id    = $key;
-                                $employee_document->document_value = $fileNameToStore;
-                                $employee_document->save();
-                            }
-
-                            if ($path['flag'] == 1) {
-                                $url = $path['url'];
-                            } else {
-                                return redirect()->back()->with('error', __($path['msg']));
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (!empty($request->document) && !is_null($request->document)) {
-                $document_implode = implode(',', array_keys($request->document));
-            } else {
-                $document_implode = null;
-            }
-
-            $employee = Employee::findOrFail($id);
-            $input    = $request->all();
-            $input['documents'] = $document_implode;
-            $employee->fill($input)->save();
-            if ($request->salary) {
-                return redirect()->route('setsalary.index')->with('success', 'Employee successfully updated.');
-            }
-
-            if (\Auth::user()->type != 'employee') {
-                // return redirect()->route('employee.index')->with('success', 'Employee successfully updated.');
-                return redirect()->route('employee.index')->with('success', __('Employee successfully updated.') . ((isset($result) && $result != 1) ? '<br> <span class="text-danger">' . $result . '</span>' : ''));
-            } else {
-                return redirect()->route('employee.show', \Illuminate\Support\Facades\Crypt::encrypt($employee->id))->with('success', __('Employee successfully updated.') . ((isset($result) && $result != 1) ? '<br> <span class="text-danger">' . $result . '</span>' : ''));
-            }
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        if ($request->password != '') {
+            $user->password = bcrypt($request->password);
         }
+
+        $user->mobile = $request->mobile;
+        $user->country_id = $request->country;
+        $user->salutation = $request->salutation;
+        $user->country_phonecode = $request->country_phonecode;
+        $user->gender = $request->gender;
+        $user->locale = $request->locale;
+
+        if ($request->status) {
+            $lastDate = $request->last_date ? Carbon::createFromFormat($this->company->date_format, $request->last_date, $this->company->timezone) : null;
+
+            if (request()->last_date != null && $request->status == 'deactive') {
+                $user->status = 'deactive';
+                $user->inactive_date = $lastDate;
+            }
+            else {
+                $user->status = 'active';
+                $user->inactive_date = null;
+            }
+        }
+
+        if ($id != user()->id) {
+            $user->login = $request->login;
+        }
+
+        if ($request->has('email_notifications')) {
+            $user->email_notifications = $request->email_notifications;
+        }
+
+        if ($request->image_delete == 'yes') {
+            Files::deleteFile($user->image, 'avatar');
+            $user->image = null;
+        }
+
+        if ($request->hasFile('image')) {
+
+            Files::deleteFile($user->image, 'avatar');
+            $user->image = Files::uploadLocalOrS3($request->image, 'avatar', 300);
+        }
+
+        if ($request->has('telegram_user_id')) {
+            $user->telegram_user_id = $request->telegram_user_id;
+        }
+
+        $user->save();
+
+        cache()->forget('user_is_active_' . $user->id);
+
+        $roleId = request()->role;
+
+        $userRole = Role::where('id', request()->role)->first();
+
+        if ($roleId != '' && $userRole->name != $user->user_other_role) {
+
+            $employeeRole = Role::where('name', 'employee')->first();
+
+            $user = User::withoutGlobalScope(ActiveScope::class)->findOrFail($user->id);
+
+            RoleUser::where('user_id', $user->id)->delete();
+            $user->roles()->attach($employeeRole->id);
+
+            if ($employeeRole->id != $roleId) {
+                $user->roles()->attach($roleId);
+            }
+
+            $user->assignUserRolePermission($roleId);
+
+            $userSession = new AppSettingController();
+            $userSession->deleteSessions([$user->id]);
+        }
+
+        $tags = json_decode($request->tags);
+
+        if (!empty($tags)) {
+            EmployeeSkill::where('user_id', $user->id)->delete();
+
+            foreach ($tags as $tag) {
+                // Check or store skills
+                $skillData = Skill::firstOrCreate(['name' => $tag->value]);
+
+                // Store user skills
+                $skill = new EmployeeSkill();
+                $skill->user_id = $user->id;
+                $skill->skill_id = $skillData->id;
+                $skill->save();
+            }
+        }
+
+        $employee = EmployeeDetails::where('user_id', '=', $user->id)->first();
+
+        if (empty($employee)) {
+            $employee = new EmployeeDetails();
+            $employee->user_id = $user->id;
+        }
+
+        $this->employeeData($request, $employee);
+
+        $employee->last_date = null;
+
+        if ($request->last_date != '') {
+            $employee->last_date = companyToYmd($request->last_date);
+        }
+
+        $employee->save();
+
+        // To add custom fields data
+        if ($request->custom_fields_data) {
+            $employee->updateCustomFieldData($request->custom_fields_data);
+        }
+
+        if (user()->id == $user->id) {
+            session(['user' => $user]);
+        }
+
+        return Reply::successWithData(__('messages.updateSuccess'), ['redirectUrl' => route('employees.index')]);
     }
 
+    /**
+     * @param int $id
+     * @return array
+     */
     public function destroy($id)
     {
-        if (Auth::user()->can('Delete Employee')) {
-            $employee      = Employee::findOrFail($id);
-            $user          = User::where('id', '=', $employee->user_id)->first();
-            $emp_documents = EmployeeDocument::where('employee_id', $employee->employee_id)->get();
-            $ContractEmployee = Contract::where('employee_name', '=', $employee->user_id)->get();
-            $payslips = PaySlip::where('employee_id', $id)->get();
-            $employee->delete();
-            $user->delete();
+        $user = User::withoutGlobalScope(ActiveScope::class)->findOrFail($id);
+        $this->deletePermission = user()->permission('delete_employees');
 
-            foreach ($ContractEmployee as $contractdelete) {
-                $contractdelete->delete();
+        abort_403(!($this->deletePermission == 'all' || ($this->deletePermission == 'added' && $user->employeeDetail->added_by == user()->id)));
+
+
+        if ($user->hasRole('admin') && !in_array('admin', user_roles())) {
+            return Reply::error(__('messages.adminCannotDelete'));
+        }
+
+        $this->deleteEmployee($user);
+
+        return Reply::success(__('messages.deleteSuccess'));
+
+    }
+
+    /**
+     * Display the specified resource.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        $this->viewPermission = user()->permission('view_employees');
+
+        $this->employee = User::with('leaveTypes.leaveType')->withoutGlobalScope(ActiveScope::class)
+            ->withOut('clientDetails')
+            ->withCount(['member', 'agents', 'openTasks'])
+            ->findOrFail($id);
+
+        if ($this->employee->employeeDetail->company_address_id) {
+            $this->companyAddress = CompanyAddress::where('id', $this->employee->employeeDetail->company_address_id)->first();
+        } else {
+            $this->companyAddress = CompanyAddress::where('is_default', 1)->where('company_id', $this->company->id)->first();
+        }
+
+        $this->employeeLanguage = LanguageSetting::where('language_code', $this->employee->locale)->first();
+
+        if (!$this->employee->hasRole('employee')) {
+            abort(404);
+        }
+
+        if ($this->employee->status == 'deactive' && !in_array('admin', user_roles())) {
+            abort(403);
+        }
+
+        abort_403(in_array('client', user_roles()));
+
+        $tab = request('tab');
+
+        if (
+            $this->viewPermission == 'all'
+            || ($this->viewPermission == 'added' && $this->employee->employeeDetail->added_by == user()->id)
+            || ($this->viewPermission == 'owned' && $this->employee->employeeDetail->user_id == user()->id)
+            || ($this->viewPermission == 'both' && ($this->employee->employeeDetail->user_id == user()->id || $this->employee->employeeDetail->added_by == user()->id))
+        ) {
+
+            if ($tab == '') {  // Works for profile
+
+                $this->fromDate = now()->timezone($this->company->timezone)->startOfMonth()->toDateString();
+                $this->toDate = now()->timezone($this->company->timezone)->endOfMonth()->toDateString();
+
+                $this->lateAttendance = Attendance::whereBetween(DB::raw('DATE(`clock_in_time`)'), [$this->fromDate, $this->toDate])
+                    ->where('late', 'yes')->where('user_id', $id)->count();
+
+                $this->leavesTaken = Leave::selectRaw('count(*) as count, SUM(if(duration="half day", 1, 0)) AS halfday')
+                    ->where('user_id', $id)
+                    ->where('status', 'approved')
+                    ->whereBetween(DB::raw('DATE(`leave_date`)'), [$this->fromDate, $this->toDate])
+                    ->first();
+
+                $this->leavesTaken = (!is_null($this->leavesTaken)) ? $this->leavesTaken->count - ($this->leavesTaken->halfday * 0.5) : 0;
+
+                $this->taskChart = $this->taskChartData($id);
+                $this->ticketChart = $this->ticketChartData($id);
+
+                if (!is_null($this->employee->employeeDetail)) {
+                    $this->employeeDetail = $this->employee->employeeDetail->withCustomFields();
+
+                    $customFields = $this->employeeDetail->getCustomFieldGroupsWithFields();
+
+                    if (!empty($customFields)) {
+                        $this->fields = $customFields->fields;
+                    }
+                }
+
+                $taskBoardColumn = TaskboardColumn::completeColumn();
+
+                $this->taskCompleted = Task::join('task_users', 'task_users.task_id', '=', 'tasks.id')
+                    ->where('task_users.user_id', $id)
+                    ->where('tasks.board_column_id', $taskBoardColumn->id)
+                    ->count();
+
+                $hoursLogged = ProjectTimeLog::where('user_id', $id)->sum('total_minutes');
+                $breakMinutes = ProjectTimeLogBreak::userBreakMinutes($id);
+
+                $timeLog = intdiv($hoursLogged - $breakMinutes, 60);
+
+                $this->hoursLogged = $timeLog;
             }
 
-            foreach ($payslips as $payslip) {
-                $payslip->delete();
+        }
+
+        $this->pageTitle = $this->employee->name;
+        $viewDocumentPermission = user()->permission('view_documents');
+        $viewImmigrationPermission = user()->permission('view_immigration');
+
+        switch ($tab) {
+        case 'tickets':
+            return $this->tickets();
+        case 'projects':
+            return $this->projects();
+        case 'attendance':
+            return $this->attendance($this->employee->id);
+        case 'tasks':
+            return $this->tasks();
+        case 'leaves':
+            return $this->leaves();
+        case 'timelogs':
+            return $this->timelogs();
+        case 'documents':
+            abort_403(($viewDocumentPermission == 'none'));
+            $this->view = 'employees.ajax.documents';
+            break;
+        case 'emergency-contacts':
+            $this->view = 'employees.ajax.emergency-contacts';
+            break;
+        case 'increment-promotions':
+            $viewIncrementPermission = user()->permission('view_increment_promotion');
+            abort_403(($viewIncrementPermission == 'none'));
+
+            $this->manageIncrementPermission = user()->permission('manage_increment_promotion');
+            $this->incrementPromotion($id);
+            $this->view = 'employees.ajax.increment-promotions';
+            break;
+        case 'appreciation':
+            $viewAppreciationPermission = user()->permission('view_appreciation');
+            abort_403(!in_array($viewAppreciationPermission, ['all', 'added', 'owned', 'both']));
+
+            $this->appreciations = $this->appreciation($this->employee->id);
+            $this->view = 'employees.ajax.appreciations';
+            break;
+        case 'leaves-quota':
+
+            $settings = company();
+            $now = Carbon::now();
+            $yearStartMonth = $settings->year_starts_from;
+            $leaveStartDate = null;
+            $leaveEndDate = null;
+
+            if($settings && $settings->leaves_start_from == 'year_start'){
+
+                if ($yearStartMonth > $now->month) {
+                    // Not completed a year yet
+                    $leaveStartDate = Carbon::create($now->year, $yearStartMonth, 1)->subYear();
+                    $leaveEndDate = $leaveStartDate->copy()->addYear()->subDay();
+                } else {
+                    $leaveStartDate = Carbon::create($now->year, $yearStartMonth, 1);
+                    $leaveEndDate = $leaveStartDate->copy()->addYear()->subDay();
+                }
+
+            } elseif ($settings && $settings->leaves_start_from == 'joining_date'){
+
+                $joiningDate = Carbon::parse($this->employee->employeedetails->joining_date->format((now(company()->timezone)->year) . '-m-d'));
+                $joinMonth = $joiningDate->month;
+                $joinDay = $joiningDate->day;
+
+                if ($joinMonth > $now->month || ($joinMonth == $now->month && $now->day < $joinDay)) {
+                    // Not completed a year yet
+                    $leaveStartDate = $joiningDate->copy()->subYear();
+                    $leaveEndDate = $joiningDate->copy()->subDay();
+                } else {
+                    // Completed a year
+                    $leaveStartDate = $joiningDate;
+                    $leaveEndDate = $joiningDate->copy()->addYear()->subDay();
+                }
+
             }
 
-            $dir = storage_path('uploads/document/');
-            foreach ($emp_documents as $emp_document) {
+            $this->employeeLeavesQuotas = $this->employee->leaveTypes;
 
-                $emp_document->delete();
-                // \File::delete(storage_path('uploads/document/' . $emp_document->document_value));
-                if (!empty($emp_document->document_value)) {
+            $hasLeaveQuotas = false;
+            $totalLeaves = 0;
+            $overUtilizedLeaves = 0;
+            $leaveCounts = [];
+            $allowedEmployeeLeavesQuotas = []; // Leave Types Which employee can take according to leave type conditions
 
-                    $file_path = 'uploads/document/' . $emp_document->document_value;
-                    $result = Utility::changeStorageLimit(\Auth::user()->creatorId(), $file_path);
+            foreach ($this->employeeLeavesQuotas as $key => $leavesQuota) {
 
-                    // unlink($dir . $emp_document->document_value);
+                if (
+                    ($leavesQuota && $leavesQuota->leaveType && $leavesQuota->leaveType->deleted_at == null || $leavesQuota->leaves_used > 0) &&
+                    $leavesQuota->leaveType && ($leavesQuota->leaveType->leaveTypeCondition($leavesQuota->leaveType, $this->employee))) {
+
+                    $hasLeaveQuotas = true;
+                    $allowedEmployeeLeavesQuotas[] = $leavesQuota;
+
+                    // $sum = ($leavesQuota->leaveType->deleted_at == null) ? $leavesQuota->leaves_remaining : 0;
+                    // $totalLeaves = $totalLeaves + ($leavesQuota?->no_of_leaves ?: 0) - ($leaveCounts[$leavesQuota->leave_type_id] ?: 0);
+                    $totalLeaves = $totalLeaves + ($leavesQuota?->leaves_remaining ?: 0);
                 }
             }
 
-            return redirect()->route('employee.index')->with('success', 'Employee successfully deleted.');
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
+            $this->leaveStartDate = $leaveStartDate->format(company()->date_format);
+            $this->leaveEndDate = $leaveEndDate->format(company()->date_format);
+            $this->leaveCounts = $leaveCounts;
 
-    public function show($id)
-    {
-        if (\Auth::user()->can('Show Employee')) {
-            try {
-                $empId        = \Illuminate\Support\Facades\Crypt::decrypt($id);
-            } catch (\RuntimeException $e) {
-                return redirect()->back()->with('error', __('Employee not avaliable'));
+            $this->hasLeaveQuotas = $hasLeaveQuotas;
+            $this->allowedLeaves = $totalLeaves;
+            $this->allowedEmployeeLeavesQuotas = $allowedEmployeeLeavesQuotas;
+            $this->view = 'employees.ajax.leaves_quota';
+            break;
+        case 'shifts':
+            abort_403(user()->permission('view_shift_roster') != 'all' || !in_array('attendance', user_modules()));
+
+            $automateShift = AutomateShift::where('user_id', $id)->first();
+            $this->shiftRotation = $automateShift ? ShiftRotation::findOrFail($automateShift->employee_shift_rotation_id) : [];
+
+            $this->view = 'employees.ajax.shifts';
+            break;
+        case 'permissions':
+            abort_403(user()->permission('manage_role_permission_setting') != 'all');
+
+            if($this->employee->customised_permissions === 1){
+                $this->modulesData = Module::with('permissions')->withCount('customPermissions')->get();
+            }else{
+                $user = User::with('role')->findOrFail($id);
+                $this->role = Role::with('permissions')->where('name', '<>', 'admin')->findOrFail($user->role[count($user->role) - 1]->role_id);
+
+                if ($this->role->name == 'client') {
+                    $clientModules = ModuleSetting::where('type', 'client')->get()->pluck('module_name');
+                    $this->modulesData = Module::with('permissions')->withCount('customPermissions')
+                        ->whereIn('module_name', $clientModules)->where('module_name', '<>', 'messages')->get();
+
+                }
+                else {
+                    $this->modulesData = Module::with('permissions')->where('module_name', '<>', 'messages')->withCount('customPermissions')->get();
+                }
             }
-            $documents    = Document::where('created_by', \Auth::user()->creatorId())->get();
-            $branches     = Branch::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $departments  = Department::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $designations = Designation::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            // $employee = Employee::where('id', '=', $empId)->orWhere('user_id', '=', $empId)->where('created_by', \Auth::user()->creatorId())->first();
-            $employee     = Employee::find($empId);
-            $employeesId  = \Auth::user()->employeeIdFormat($employee->employee_id);
-            $empId        = Crypt::decrypt($id);
 
-            //     $employee     = Employee::find($empId);
-            // $branch= Branch::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
+            $this->employeeModules = array_merge(
+                ModuleSetting::where('module_name', '<>', 'settings')
+                                ->where('status', 'active')
+                                ->where('type', 'employee')
+                                ->pluck('module_name')
+                                ->toArray(),
+                ['settings', 'dashboards']
+            );
 
-            return view('employee.show', compact('employee', 'employeesId', 'branches', 'departments', 'designations', 'documents'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+            $this->view = 'employees.ajax.permissions';
+            break;
+
+        case 'activity':
+            $userId = auth()->id();
+
+
+            $this->histories = EmployeeActivity::where('emp_id', $id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+
+            $this->view = 'employees.ajax.activity';
+            break;
+
+        case 'immigration':
+            abort_403($viewImmigrationPermission == 'none');
+            $this->passport = Passport::with('country')->where('user_id', $this->employee->id)->first();
+            $this->visa = VisaDetail::with('country')->where('user_id', $this->employee->id)->get();
+            $this->view = 'employees.ajax.immigration';
+            break;
+
+        default:
+            $this->view = 'employees.ajax.profile';
+            break;
         }
+
+        if (request()->ajax()) {
+            $html = view($this->view, $this->data)->render();
+
+            return Reply::dataOnly(['views' => $this->view, 'status' => 'success', 'html' => $html, 'title' => $this->pageTitle]);
+        }
+
+        $this->activeTab = $tab ?: 'profile';
+
+        return view('employees.show', $this->data);
     }
 
-    function employeeNumber()
+    public function incrementPromotion($id)
     {
-        $latest = Employee::where('created_by', '=', \Auth::user()->creatorId())->latest('id')->first();
-        if (!$latest) {
-            return 1;
+        $promotions = Promotion::employeePromotions($id)
+            ->map(function ($promotion) use ($id) {
+                return [
+                    'type' => 'promotion',
+                    'date' => $promotion->date,
+                    'data' => $promotion,
+                ];
+            });
+
+        if (module_enabled('Payroll') && in_array('payroll', user_modules())) {
+            $increments = EmployeeMonthlySalary::employeeIncrements($id)
+                ->map(function ($increment, $index) use ($id) {
+
+                    $netSalaryData = EmployeeMonthlySalary::employeeNetSalary($id, $increment->date);
+                    $isFirst = ($index === 0);
+                    $netSalary = $isFirst ? $netSalaryData['initialSalary'] : $netSalaryData['netSalary'];
+                    $incrementAmount = $increment->amount;
+                    $percentIncrement = ($netSalary > 0) ? round(($incrementAmount / $netSalary) * 100) : 0;
+
+                    return [
+                        'type' => 'increment',
+                        'date' => $increment->date,
+                        'data' => $increment,
+                        'netSalary' => $netSalary,
+                        'percentage' => $percentIncrement
+                    ];
+                });
+
+            $payrollCurrency = PayrollSetting::with('currency')->first();
+            $this->currency = $payrollCurrency->currency ? $payrollCurrency->currency->id : '';
+        }
+        else {
+            $increments = collect([]);
+            $this->currency = $this->company->currency_id;
         }
 
-        return $latest->employee_id + 1;
+        $this->careerProgress = $promotions->concat($increments)
+            ->sortByDesc('date')->values();
+
+        return $this->careerProgress;
     }
 
-    public function export()
+    /**
+     * XXXXXXXXXXX
+     *
+     * @return array
+     */
+    public function taskChartData($id)
     {
-        $name = 'employee_' . date('Y-m-d i:h:s');
-        $data = Excel::download(new EmployeesExport(), $name . '.xlsx');
+        $taskStatus = TaskboardColumn::all();
+        $data['labels'] = $taskStatus->pluck('column_name');
+        $data['colors'] = $taskStatus->pluck('label_color');
+        $data['values'] = [];
 
+        foreach ($taskStatus as $label) {
+            $data['values'][] = Task::join('task_users', 'task_users.task_id', '=', 'tasks.id')
+                ->where('task_users.user_id', $id)->where('tasks.board_column_id', $label->id)->count();
+        }
 
         return $data;
     }
 
-    // public function importFile()
-    // {
-    //     return view('employee.import');
-    // }
-
-    // public function import(Request $request)
-    // {
-    //     $rules = [
-    //         'file' => 'required|mimes:csv,txt',
-    //     ];
-
-    //     $validator = \Validator::make($request->all(), $rules);
-
-    //     if ($validator->fails()) {
-    //         $messages = $validator->getMessageBag();
-
-    //         return redirect()->back()->with('error', $messages->first());
-    //     }
-
-    //     try {
-    //         $employees = (new EmployeesImport())->toArray(request()->file('file'))[0];
-    //         $totalCustomer = count($employees) - 1;
-    //         $errorArray    = [];
-
-    //         for ($i = 1; $i <= count($employees) - 1; $i++) {
-
-    //             $employee = $employees[$i];
-    //             $employeeByEmail = Employee::where('email', $employee[5])->first();
-    //             $userByEmail = User::where('email', $employee[5])->first();
-
-    //             if (!empty($employeeByEmail) && !empty($userByEmail)) {
-    //                 $employeeData = $employeeByEmail;
-    //             } else {
-    //                 $user = new User();
-    //                 $user->name = $employee[0];
-    //                 $user->email = $employee[5];
-    //                 $user->password = Hash::make($employee[6]);
-    //                 $user->type = 'employee';
-    //                 $user->lang = 'en';
-    //                 $user->created_by = \Auth::user()->creatorId();
-    //                 $user->email_verified_at = date("Y-m-d H:i:s");
-    //                 $user->save();
-    //                 $user->assignRole('Employee');
-    //                 $employeeData = new Employee();
-    //                 $employeeData->employee_id      = $this->employeeNumber();
-    //                 $employeeData->user_id             = $user->id;
-    //             }
-
-
-    //             $employeeData->name                = $employee[0];
-    //             $employeeData->dob                 = $employee[1];
-    //             $employeeData->gender              = $employee[2];
-    //             $employeeData->phone               = $employee[3];
-    //             $employeeData->address             = $employee[4];
-    //             $employeeData->email               = $employee[5];
-    //             $employeeData->password            = \Hash::make($employee[6]);
-    //             $employeeData->employee_id         = $this->employeeNumber();
-    //             $employeeData->branch_id           = $employee[8];
-    //             $employeeData->department_id       = $employee[9];
-    //             $employeeData->designation_id      = $employee[10];
-    //             $employeeData->company_doj         = $employee[11];
-    //             $employeeData->account_holder_name = $employee[12];
-    //             $employeeData->account_number      = $employee[13];
-    //             $employeeData->bank_name           = $employee[14];
-    //             $employeeData->bank_identifier_code = $employee[15];
-    //             $employeeData->branch_location     = $employee[16];
-    //             $employeeData->tax_payer_id        = $employee[17];
-    //             $employeeData->created_by          = \Auth::user()->creatorId();
-
-    //             if (empty($employeeData)) {
-
-    //                 $errorArray[] = $employeeData;
-    //             } else {
-
-    //                 $employeeData->save();
-    //             }
-    //         }
-    //     } catch (\Throwable $th) {
-    //         return redirect()->back()->with('error', __('Something went wrong please try again.'));
-    //     }
-
-    //     $errorRecord = [];
-
-    //     if (empty($errorArray)) {
-    //         $data['status'] = 'success';
-    //         $data['msg']    = __('Record successfully imported');
-    //     } else {
-    //         $data['status'] = 'error';
-    //         $data['msg']    = count($errorArray) . ' ' . __('Record imported fail out of' . ' ' . $totalCustomer . ' ' . 'record');
-
-
-    //         foreach ($errorArray as $errorData) {
-
-    //             $errorRecord[] = implode(',', $errorData);
-    //         }
-
-    //         \Session::put('errorArray', $errorRecord);
-    //     }
-
-    //     return redirect()->back()->with($data['status'], $data['msg']);
-    // }
-
-    public function importFile()
+    /**
+     * XXXXXXXXXXX
+     *
+     * @return array
+     */
+    public function ticketChartData($id)
     {
-        return view('employee.import');
-    }
+        $labels = ['open', 'pending', 'resolved', 'closed'];
+        $data['labels'] = [__('app.open'), __('app.pending'), __('app.resolved'), __('app.closed')];
+        $data['colors'] = ['#D30000', '#FCBD01', '#2CB100', '#1d82f5'];
+        $data['values'] = [];
 
-    public function fileImport(Request $request)
-    {
-        session_start();
-
-        $error = '';
-
-        $html = '';
-
-        if ($request->hasFile('file') && $request->file->getClientOriginalName() != '') {
-            $file_array = explode(".", $request->file->getClientOriginalName());
-
-            $extension = end($file_array);
-            if ($extension == 'csv') {
-                $file_data = fopen($request->file->getRealPath(), 'r');
-
-                $file_header = fgetcsv($file_data);
-                $html .= '<table class="table table-bordered"><tr>';
-
-                for ($count = 0; $count < count($file_header); $count++) {
-                    $html .= '
-                            <th>
-                                <select name="set_column_data" class="form-control set_column_data" data-column_number="' . $count . '">
-                                <option value="">Set Count Data</option>
-                                <option value="name">Name</option>
-                                <option value="dob">DOB</option>
-                                <option value="gender">Gender</option>
-                                <option value="phone">Phone</option>
-                                <option value="address">Address</option>
-                                <option value="email">Email</option>
-                                <option value="password">Password</option>
-                                <option value="company_doj">Company Doj</option>
-                                <option value="account_holder_name">Account Holder Name</option>
-                                <option value="account_number">Account Number</option>
-                                <option value="bank_name">Bank Name</option>
-                                <option value="bank_identifier_code">Bank Identifier Code</option>
-                                <option value="branch_location">Branch Location</option>
-                                <option value="tax_payer_id">Tax Payer Id</option>
-                                </select>
-                            </th>
-                            ';
-                }
-                $html .= '
-                            <th>
-                                    <select name="set_column_data branch_name" class="form-control set_column_data branch-name" data-column_number="' . $count . '">
-                                        <option value="branch">Branch</option>
-                                    </select>
-                            </th>
-                            ';
-                $html .= '
-                            <th>
-                                    <select name="set_column_data department_name" class="form-control set_column_data department-name" data-column_number="' . $count . '">
-                                        <option value="department">Department</option>
-                                    </select>
-                            </th>
-                            ';
-                $html .= '
-                            <th>
-                                    <select name="set_column_data designation_name" class="form-control set_column_data designation-name" data-column_number="' . $count . '">
-                                        <option value="designation">Designation</option>
-                                    </select>
-                            </th>
-                            ';
-                $html .= '</tr>';
-                $limit = 0;
-                $temp_data = [];
-                while (($row = fgetcsv($file_data)) !== false) {
-                    $limit++;
-
-                    $html .= '<tr>';
-
-                    for ($count = 0; $count < count($row); $count++) {
-                        $html .= '<td>' . $row[$count] . '</td>';
-                    }
-
-                    $html .= '<td>
-                                <select name="branch_name" class="form-control branch-name-value" id="branch_name" required>;';
-                    $branchs = Branch::where('created_by', \Auth::user()->id)->pluck('name', 'id');
-                    foreach ($branchs as $key => $branch) {
-                        $html .= ' <option value="' . $key . '">' . $branch . '</option>';
-                    }
-                    $html .= '  </select>
-                            </td>';
-
-                    $html .= '<td>
-                                <select name="department_name" class="form-control department-name-value" id="department_name" required>;';
-                    $departments = Department::where('created_by', \Auth::user()->id)->pluck('name', 'id');
-                    foreach ($departments as $key => $department) {
-                        $html .= ' <option value="' . $key . '">' . $department . '</option>';
-                    }
-                    $html .= '  </select>
-                            </td>';
-
-                    $html .= '<td>
-                                <select name="designation_name" class="form-control designation-name-value" id="designation_name" required>;';
-                    $designations = Designation::where('created_by', \Auth::user()->id)->pluck('name', 'id');
-                    foreach ($designations as $key => $designation) {
-                        $html .= ' <option value="' . $key . '">' . $designation . '</option>';
-                    }
-                    $html .= '  </select>
-                            </td>';
-
-                    $html .= '</tr>';
-
-                    $temp_data[] = $row;
-                }
-                $_SESSION['file_data'] = $temp_data;
-            } else {
-                $error = 'Only <b>.csv</b> file allowed';
-            }
-        } else {
-
-            $error = 'Please Select CSV File';
-        }
-        $output = array(
-            'error' => $error,
-            'output' => $html,
-        );
-
-        return json_encode($output);
-    }
-
-    public function fileImportModal()
-    {
-        return view('employee.import_modal');
-    }
-
-    public function employeeImportdata(Request $request)
-    {
-        session_start();
-        $html = '<h3 class="text-danger text-center">Below data is not inserted</h3></br>';
-        $flag = 0;
-        $html .= '<table class="table table-bordered"><tr>';
-        try {
-            $file_data = $_SESSION['file_data'];
-
-            unset($_SESSION['file_data']);
-        } catch (\Throwable $th) {
-            $html = '<h3 class="text-danger text-center">Something went wrong, Please try again</h3></br>';
-            return response()->json([
-                'html' => true,
-                'response' => $html,
-            ]);
+        foreach ($labels as $label) {
+            $data['values'][] = Ticket::where('agent_id', $id)->where('status', $label)->count();
         }
 
-        $user = Auth::user();
-        foreach ($file_data as $key => $row) {
-            $employees = Employee::where('created_by', \Auth::user()->creatorId())->Where('email', 'like', $row[$request->email])->get();
-            $branch = Branch::find($request->branch[$key]);
-            $department = Department::find($request->department[$key]);
-            $designation = Designation::find($request->designation[$key]);
+        return $data;
+    }
 
-            if ($employees->isEmpty()) {
+    public function byDepartment($id)
+    {
+        $viewPermission = user()->permission('view_employees');
+        $users = User::with('employeeDetail')->withoutGlobalScope(ActiveScope::class)->join('employee_details', 'employee_details.user_id', '=', 'users.id');
 
-                try {
-                    $user = User::create(
-                        [
-                            'name' => $row[$request->name],
-                            'email' => $row[$request->email],
-                            'password' => Hash::make($row[$request->password]),
-                            'email_verified_at' => date('Y-m-d h:i:s'),
-                            'type' => 'employee',
-                            'lang' => 'en',
-                            'created_by' => \Auth::user()->creatorId(),
-                        ]
-                    );
-                    $user->assignRole('Employee');
-                    Employee::create([
-                        'name' => $row[$request->name],
-                        'user_id' => $user->id,
-                        'dob' => $row[$request->dob],
-                        'gender' => $row[$request->gender],
-                        'phone' => $row[$request->phone],
-                        'address' => $row[$request->address],
-                        'email' => $row[$request->email],
-                        'password' => Hash::make($row[$request->password]),
-                        'employee_id' => $this->employeeNumber(),
-                        'branch_id' => !empty($branch) ? $branch->id : 0,
-                        'department_id' => !empty($department) ? $department->id : 0,
-                        'designation_id' => !empty($designation) ? $designation->id : 0,
-                        'company_doj' => $row[$request->company_doj],
-                        'account_holder_name' => $row[$request->account_holder_name],
-                        'account_number' => $row[$request->account_number],
-                        'bank_name' => $row[$request->bank_name],
-                        'bank_identifier_code' => $row[$request->bank_identifier_code],
-                        'branch_location' => $row[$request->branch_location],
-                        'tax_payer_id' => $row[$request->tax_payer_id],
-                        'created_by' => \Auth::user()->creatorId(),
-                    ]);
-                } catch (\Exception $e) {
-                    $flag = 1;
-                    $html .= '<tr>';
+        if (request()->request_from == 'rotation' && request()->rotation) {
+            $rotAssignedEmps = AutomateShift::where('employee_shift_rotation_id', request()->rotation)->pluck('user_id');
+            $users = $users->whereNotIn('users.id', $rotAssignedEmps);
+        }
 
-                    $html .= '<td>' . (isset($row[$request->name]) ? $row[$request->name] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->dob]) ? $row[$request->dob] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->gender]) ? $row[$request->gender] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->phone]) ? $row[$request->phone] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->address]) ? $row[$request->address] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->email]) ? $row[$request->email] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->password]) ? $row[$request->password] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->company_doj]) ? $row[$request->company_doj] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->account_holder_name]) ? $row[$request->account_holder_name] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->account_number]) ? $row[$request->account_number] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->bank_name]) ? $row[$request->bank_name] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->bank_identifier_code]) ? $row[$request->bank_identifier_code] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request->account_holder_name]) ? $row[$request->account_holder_name] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$branch->id]) ? $row[$branch->id] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$department->id]) ? $row[$department->id] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$designation->id]) ? $row[$designation->id] : '-') . '</td>';
+        if ($id != 0) {
+            $users = $users->where('employee_details.department_id', $id);
+        }
 
-                    $html .= '</tr>';
-                }
-            } else {
-                $flag = 1;
-                $html .= '<tr>';
+        if ($viewPermission == 'owned' || $viewPermission == 'none') {
+            $users = $users->where('users.id', user()->id);
+        } elseif ($viewPermission == 'both') {
+            $users = $users->where(function ($query) {
+                $query->where('employee_details.user_id', user()->id)
+                      ->orWhere('employee_details.added_by', user()->id);
+            });
+        } elseif ($viewPermission == 'added') {
+            $users = $users->where('employee_details.added_by', user()->id);
+        }
 
-                $html .= '<td>' . (isset($row[$request->name]) ? $row[$request->name] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->dob]) ? $row[$request->dob] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->gender]) ? $row[$request->gender] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->phone]) ? $row[$request->phone] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->address]) ? $row[$request->address] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->email]) ? $row[$request->email] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->password]) ? $row[$request->password] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->company_doj]) ? $row[$request->company_doj] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->account_holder_name]) ? $row[$request->account_holder_name] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->account_number]) ? $row[$request->account_number] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->bank_name]) ? $row[$request->bank_name] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->bank_identifier_code]) ? $row[$request->bank_identifier_code] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$request->account_holder_name]) ? $row[$request->account_holder_name] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$branch->id]) ? $row[$branch->id] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$department->id]) ? $row[$department->id] : '-') . '</td>';
-                $html .= '<td>' . (isset($row[$designation->id]) ? $row[$designation->id] : '-') . '</td>';
+        $users = $users->select('users.*')->where('status', 'active')->get();
 
-                $html .= '</tr>';
+        $options = '';
+
+        foreach ($users as $item) {
+            if($item->status == 'active'){
+                $content = ($item->status === 'deactive') ? "<span class='badge badge-pill badge-danger border align-center ml-2 px-2'>Inactive</span>" : '';
+
+                $options .= '<option  data-content="<div class=\'d-inline-block mr-1\'><img class=\'taskEmployeeImg rounded-circle\' src=' . $item->image_url . ' ></div>  ' . $item->name . $content . '" value="' . $item->id . '"> ' . $item->name . ' </option>';
             }
         }
 
-        $html .= '
-                        </table>
-                        <br />
-                        ';
-        if ($flag == 1) {
-
-            return response()->json([
-                'html' => true,
-                'response' => $html,
-            ]);
-        } else {
-            return response()->json([
-                'html' => false,
-                'response' => 'Data Imported Successfully',
-            ]);
-        }
+        return Reply::dataOnly(['status' => 'success', 'data' => $options]);
     }
 
-    public function profile(Request $request)
+    public function appreciation($employeeID)
     {
-        if (\Auth::user()->can('Manage Employee Profile')) {
-            $employees = Employee::where('created_by', \Auth::user()->creatorId())->with(['designation', 'user']);
-            if (!empty($request->branch_id)) {
-                $employees->where('branch_id', $request->branch_id);
+        $viewAppreciationPermission = user()->permission('view_appreciation');
+
+        if ($viewAppreciationPermission == 'none') {
+            return [];
+        }
+
+        $appreciations = Appreciation::with(['award', 'award.awardIcon', 'awardTo'])->select('id', 'award_id', 'award_to', 'award_date', 'image', 'summary', 'created_at');
+        $appreciations->join('awards', 'awards.id', '=', 'appreciations.award_id');
+
+        if ($viewAppreciationPermission == 'added') {
+            $appreciations->where('appreciations.added_by', user()->id);
+        }
+
+        if ($viewAppreciationPermission == 'owned') {
+            $appreciations->where('appreciations.award_to', user()->id);
+        }
+
+        if ($viewAppreciationPermission == 'both') {
+            $appreciations->where(function ($q) {
+                $q->where('appreciations.added_by', '=', user()->id);
+
+                $q->orWhere('appreciations.award_to', '=', user()->id);
+            });
+        }
+
+        $appreciations = $appreciations->select('appreciations.*')->where('appreciations.award_to', $employeeID)->get();
+
+        return $appreciations;
+    }
+
+    public function projects()
+    {
+
+        $viewPermission = user()->permission('view_employee_projects');
+        abort_403(!in_array($viewPermission, ['all']));
+
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->view = 'employees.ajax.projects';
+
+        $dataTable = new ProjectsDataTable();
+
+        return $dataTable->render('employees.show', $this->data);
+
+    }
+
+    public function tickets()
+    {
+        $viewPermission = user()->permission('view_tickets');
+        abort_403(!(in_array($viewPermission, ['all']) && in_array('tickets', user_modules())));
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->tickets = Ticket::all();
+        $this->view = 'employees.ajax.tickets';
+        $dataTable = new TicketDataTable();
+
+        return $dataTable->render('employees.show', $this->data);
+
+    }
+
+    public function tasks()
+    {
+        $viewPermission = user()->permission('view_employee_tasks');
+        abort_403(!in_array($viewPermission, ['all']));
+
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->taskBoardStatus = TaskboardColumn::all();
+        $this->view = 'employees.ajax.tasks';
+
+        $dataTable = new TasksDataTable();
+
+        return $dataTable->render('employees.show', $this->data);
+    }
+
+    public function leaves()
+    {
+
+        $viewPermission = user()->permission('view_leaves_taken');
+        abort_403(!in_array($viewPermission, ['all']));
+
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->leaveTypes = LeaveType::all();
+        $this->view = 'employees.ajax.leaves';
+
+        $dataTable = new LeaveDataTable();
+
+        return $dataTable->render('employees.show', $this->data);
+    }
+
+    public function attendance($employeeId)
+    {
+        $this->viewAttendancePermission = user()->permission('view_attendance');
+        abort_403(in_array($this->viewAttendancePermission, ['none']));
+
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->employees = User::with('employeeDetail')->where('id', $employeeId)->get();
+
+        $now = now();
+        $this->year = $now->format('Y');
+        $this->month = $now->format('m');
+        $this->departments = Team::all();
+        $this->designations = Designation::all();
+
+        return view('employees.ajax.attendance', $this->data);
+    }
+
+    public function timelogs()
+    {
+
+        $viewPermission = user()->permission('view_employee_timelogs');
+        abort_403(!(in_array($viewPermission, ['all']) && in_array('timelogs', user_modules())));
+
+        $tab = request('tab');
+        $this->activeTab = $tab ?: 'profile';
+        $this->view = 'employees.ajax.timelogs';
+
+        $dataTable = new TimeLogsDataTable();
+
+        return $dataTable->render('employees.show', $this->data);
+    }
+
+    /**
+     * @return \Illuminate\Contracts\Foundation\Application|\Illuminate\Contracts\View\Factory|\Illuminate\Contracts\View\View
+     */
+    public function inviteMember()
+    {
+        abort_403(!in_array(user()->permission('add_employees'), ['all']));
+
+        return view('employees.ajax.invite_member', $this->data);
+
+    }
+
+    /**
+     * XXXXXXXXXXX
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function sendInvite(InviteEmailRequest $request)
+    {
+        $emails = json_decode($request->email);
+
+        if (!empty($emails)) {
+            foreach ($emails as $email) {
+                $invite = new UserInvitation();
+                $invite->user_id = user()->id;
+                $invite->email = $email->value;
+                $invite->message = $request->message;
+                $invite->invitation_type = 'email';
+                $invite->invitation_code = sha1(time() . user()->id);
+                $invite->save();
             }
-            if (!empty($request->department_id)) {
-                $employees->where('department_id', $request->department_id);
-            }
-            if (!empty($request->designation_id)) {
-                $employees->where('designation_id', $request->designation_id);
-            }
-            $employees = $employees->get();
-
-            $brances = Branch::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-
-            $departments = Department::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-
-            $designations = Designation::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-
-            return view('employee.profile', compact('employees', 'departments', 'designations', 'brances'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
-
-    public function profileShow($id)
-    {
-        if (\Auth::user()->can('Show Employee Profile')) {
-            $empId        = Crypt::decrypt($id);
-            $documents    = Document::where('created_by', \Auth::user()->creatorId())->get();
-            $branches     = Branch::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $departments  = Department::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $designations = Designation::where('created_by', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $employee     = Employee::find($empId);
-            if ($employee == null) {
-                $employee     = Employee::where('user_id', $empId)->first();
-            }
-
-            $employeesId  = \Auth::user()->employeeIdFormat($employee->employee_id);
-
-            return view('employee.show', compact('employee', 'employeesId', 'branches', 'departments', 'designations', 'documents'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
-    public function lastLogin(Request $request)
-    {
-        $users = User::where('created_by', \Auth::user()->creatorId())->get();
-
-        $time = date_create($request->month);
-        $firstDayofMOnth = (date_format($time, 'Y-m-d'));
-        $lastDayofMonth =    \Carbon\Carbon::parse($request->month)->endOfMonth()->toDateString();
-        $objUser = \Auth::user();
-
-        $usersList = User::where('created_by', '=', $objUser->creatorId())
-            ->whereNotIn('type', ['super admin', 'company'])->get()->pluck('name', 'id');
-        $usersList->prepend('All', '');
-        if ($request->month == null) {
-            $userdetails = DB::table('login_details')
-                ->join('users', 'login_details.user_id', '=', 'users.id')
-                ->select(DB::raw('login_details.*, users.id as user_id , users.name as user_name , users.email as user_email ,users.type as user_type'))
-                ->where(['login_details.created_by' => \Auth::user()->creatorId()])
-                ->whereMonth('date', date('m'))->whereYear('date', date('Y'));
-        } else {
-            $userdetails = DB::table('login_details')
-                ->join('users', 'login_details.user_id', '=', 'users.id')
-                ->select(DB::raw('login_details.*, users.id as user_id , users.name as user_name , users.email as user_email ,users.type as user_type'))
-                ->where(['login_details.created_by' => \Auth::user()->creatorId()]);
-        }
-        if (!empty($request->month)) {
-            $userdetails->where('date', '>=', $firstDayofMOnth);
-            $userdetails->where('date', '<=', $lastDayofMonth);
-        }
-        if (!empty($request->employee)) {
-            $userdetails->where(['user_id'  => $request->employee]);
-        }
-        $userdetails = $userdetails->get();
-
-        return view('employee.lastLogin', compact('users', 'usersList', 'userdetails'));
-    }
-
-    public function employeeJson(Request $request)
-    {
-        $employees = Employee::where('branch_id', $request->branch)->get()->pluck('name', 'id')->toArray();
-
-        return response()->json($employees);
-    }
-
-    public function joiningletterPdf($id)
-    {
-        $users = \Auth::user();
-
-        $currantLang = $users->currentLanguage();
-        $joiningletter = JoiningLetter::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-        $obj = [
-            'date' =>  \Auth::user()->dateFormat($date),
-            'app_name' => env('APP_NAME'),
-            'employee_name' => $employees->name,
-            'address' => !empty($employees->address) ? $employees->address : '',
-            'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-            'start_date' => !empty($employees->company_doj) ? $employees->company_doj : '',
-            'branch' => !empty($employees->Branch->name) ? $employees->Branch->name : '',
-            'start_time' => !empty($settings['company_start_time']) ? $settings['company_start_time'] : '',
-            'end_time' => !empty($settings['company_end_time']) ? $settings['company_end_time'] : '',
-            'total_hours' => $result,
-        ];
-
-        $joiningletter->content = JoiningLetter::replaceVariable($joiningletter->content, $obj);
-        return view('employee.template.joiningletterpdf', compact('joiningletter', 'employees'));
-    }
-    public function joiningletterDoc($id)
-    {
-        $users = \Auth::user();
-
-        $currantLang = $users->currentLanguage();
-        $joiningletter = JoiningLetter::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-
-        $obj = [
-            'date' =>  \Auth::user()->dateFormat($date),
-
-            'app_name' => env('APP_NAME'),
-            'employee_name' => $employees->name,
-            'address' => !empty($employees->address) ? $employees->address : '',
-            'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-            'start_date' => !empty($employees->company_doj) ? $employees->company_doj : '',
-            'branch' => !empty($employees->Branch->name) ? $employees->Branch->name : '',
-            'start_time' => !empty($settings['company_start_time']) ? $settings['company_start_time'] : '',
-            'end_time' => !empty($settings['company_end_time']) ? $settings['company_end_time'] : '',
-            'total_hours' => $result,
-
-        ];
-        $joiningletter->content = JoiningLetter::replaceVariable($joiningletter->content, $obj);
-        return view('employee.template.joiningletterdocx', compact('joiningletter', 'employees'));
-    }
-
-    public function ExpCertificatePdf($id)
-    {
-        $currantLang = \Cookie::get('LANGUAGE');
-        if (!isset($currantLang)) {
-            $currantLang = 'en';
-        }
-        $termination = Termination::where('employee_id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $experience_certificate = ExperienceCertificate::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-        $date1 = date_create($employees->company_doj);
-        $date2 = date_create($employees->termination_date);
-        $diff  = date_diff($date1, $date2);
-        $duration = $diff->format("%a days");
-
-        if (!empty($termination->termination_date)) {
-
-            $obj = [
-                'date' =>  \Auth::user()->dateFormat($date),
-                'app_name' => env('APP_NAME'),
-                'employee_name' => $employees->name,
-                'payroll' => !empty($employees->salaryType->name) ? $employees->salaryType->name : '',
-                'duration' => $duration,
-                'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-
-            ];
-        } else {
-            return redirect()->back()->with('error', __('Termination date is required.'));
         }
 
-
-        $experience_certificate->content = ExperienceCertificate::replaceVariable($experience_certificate->content, $obj);
-        return view('employee.template.ExpCertificatepdf', compact('experience_certificate', 'employees'));
-    }
-    public function ExpCertificateDoc($id)
-    {
-        $currantLang = \Cookie::get('LANGUAGE');
-        if (!isset($currantLang)) {
-            $currantLang = 'en';
-        }
-        $termination = Termination::where('employee_id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $experience_certificate = ExperienceCertificate::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();;
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-        $date1 = date_create($employees->company_doj);
-        $date2 = date_create($employees->termination_date);
-        $diff  = date_diff($date1, $date2);
-        $duration = $diff->format("%a days");
-        if (!empty($termination->termination_date)) {
-            $obj = [
-                'date' =>  \Auth::user()->dateFormat($date),
-                'app_name' => env('APP_NAME'),
-                'employee_name' => $employees->name,
-                'payroll' => !empty($employees->salaryType->name) ? $employees->salaryType->name : '',
-                'duration' => $duration,
-                'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-
-            ];
-        } else {
-            return redirect()->back()->with('error', __('Termination date is required.'));
-        }
-
-        $experience_certificate->content = ExperienceCertificate::replaceVariable($experience_certificate->content, $obj);
-        return view('employee.template.ExpCertificatedocx', compact('experience_certificate', 'employees'));
-    }
-    public function NocPdf($id)
-    {
-        $users = \Auth::user();
-
-        $currantLang = $users->currentLanguage();
-        $noc_certificate = NOC::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-
-
-        $obj = [
-            'date' =>  \Auth::user()->dateFormat($date),
-            'employee_name' => $employees->name,
-            'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-            'app_name' => env('APP_NAME'),
-        ];
-
-        $noc_certificate->content = NOC::replaceVariable($noc_certificate->content, $obj);
-        return view('employee.template.Nocpdf', compact('noc_certificate', 'employees'));
-    }
-    public function NocDoc($id)
-    {
-        $users = \Auth::user();
-
-        $currantLang = $users->currentLanguage();
-        $noc_certificate = NOC::where('lang', $currantLang)->where('created_by', \Auth::user()->creatorId())->first();
-        $date = date('Y-m-d');
-        $employees = Employee::where('id', $id)->where('created_by', \Auth::user()->creatorId())->first();
-        $settings = \App\Models\Utility::settings();
-        $secs = strtotime($settings['company_start_time']) - strtotime("00:00");
-        $result = date("H:i", strtotime($settings['company_end_time']) - $secs);
-
-
-        $obj = [
-            'date' =>  \Auth::user()->dateFormat($date),
-            'employee_name' => $employees->name,
-            'designation' => !empty($employees->designation->name) ? $employees->designation->name : '',
-            'app_name' => env('APP_NAME'),
-        ];
-
-        $noc_certificate->content = NOC::replaceVariable($noc_certificate->content, $obj);
-        return view('employee.template.Nocdocx', compact('noc_certificate', 'employees'));
+        return Reply::success(__('messages.inviteEmailSuccess'));
     }
 
-    public function getdepartment(Request $request)
+    /**
+     * XXXXXXXXXXX
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function createLink(CreateInviteLinkRequest $request)
     {
-        if ($request->branch_id == 0) {
-            $departments = Department::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id')->toArray();
-        } else {
-            $departments = Department::where('created_by', '=', \Auth::user()->creatorId())->where('branch_id', $request->branch_id)->get()->pluck('name', 'id')->toArray();
-        }
-        return response()->json($departments);
+        $invite = new UserInvitation();
+        $invite->user_id = user()->id;
+        $invite->invitation_type = 'link';
+        $invite->invitation_code = sha1(time() . user()->id);
+        $invite->email_restriction = (($request->allow_email == 'selected') ? $request->email_domain : null);
+        $invite->save();
+
+        return Reply::successWithData(__('messages.inviteLinkSuccess'), ['link' => route('invitation', $invite->invitation_code)]);
     }
 
-    public function json(Request $request)
+    /**
+     * @param mixed $request
+     * @param mixed $employee
+     */
+    public function employeeData($request, $employee): void
     {
-        if ($request->department_id == 0) {
-            $designations = Designation::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id')->toArray();
-        }
-        $designations = Designation::where('department_id', $request->department_id)->where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id')->toArray();
-
-        return response()->json($designations);
+        $employee->employee_id = $request->employee_id;
+        $employee->address = $request->address;
+        $employee->hourly_rate = $request->hourly_rate;
+        $employee->slack_username = $request->slack_username;
+        $employee->department_id = $request->department;
+        $employee->designation_id = $request->designation;
+        $employee->company_address_id = $request->company_address;
+        $employee->reporting_to = $request->reporting_to;
+        $employee->about_me = $request->about_me;
+        $employee->joining_date = companyToYmd($request->joining_date);
+        $employee->date_of_birth = $request->date_of_birth ? companyToYmd($request->date_of_birth) : null;
+        $employee->calendar_view = 'task,events,holiday,tickets,leaves,follow_ups';
+        $employee->probation_end_date = $request->probation_end_date ? companyToYmd($request->probation_end_date) : null;
+        $employee->notice_period_start_date = $request->notice_period_start_date ? companyToYmd($request->notice_period_start_date) : null;
+        $employee->notice_period_end_date = $request->notice_period_end_date ? companyToYmd($request->notice_period_end_date) : null;
+        $employee->marital_status = $request->marital_status;
+        $employee->marriage_anniversary_date = $request->marriage_anniversary_date ? companyToYmd($request->marriage_anniversary_date) : null;
+        $employee->employment_type = $request->employment_type;
+        $employee->internship_end_date = $request->internship_end_date ? companyToYmd($request->internship_end_date) : null;
+        $employee->contract_end_date = $request->contract_end_date ? companyToYmd($request->contract_end_date) : null;
     }
 
-    public function view($id)
+    public function importMember()
     {
-        $users = LoginDetail::find($id);
-        return view('employee.user_log', compact('users'));
-    }
+        $this->pageTitle = __('app.importExcel') . ' ' . __('app.employee');
 
-    public function logindestroy($id)
-    {
-        $employee = LoginDetail::where('user_id', $id)->delete();
+        $addPermission = user()->permission('add_employees');
+        abort_403(!in_array($addPermission, ['all', 'added']));
 
-        return redirect()->back()->with('success', 'Employee successfully deleted.');
-    }
+        $this->view = 'employees.ajax.import';
 
-    public function employeePassword($id)
-    {
-        $eId        = \Crypt::decrypt($id);
-
-        $user = User::find($eId);
-
-        $employee = User::where('id', $eId)->first();
-
-        return view('employee.reset', compact('user', 'employee'));
-    }
-
-    public function employeePasswordReset(Request $request, $id)
-    {
-        $validator = \Validator::make(
-            $request->all(),
-            [
-                'password' => 'required|confirmed|same:password_confirmation',
-            ]
-        );
-
-        if ($validator->fails()) {
-            $messages = $validator->getMessageBag();
-
-            return redirect()->back()->with('error', $messages->first());
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
         }
 
-
-        $user                 = User::where('id', $id)->first();
-        $user->forceFill([
-            'password' => Hash::make($request->password),
-            'is_login_enable' => 1,
-        ])->save();
-
-        return redirect()->route('employee.index')->with(
-            'success',
-            'Employee Password successfully updated.'
-        );
+        return view('employees.create', $this->data);
     }
+
+    public function importStore(ImportRequest $request)
+    {
+        $rvalue = $this->importFileProcess($request, EmployeeImport::class);
+
+        if($rvalue == 'abort'){
+            return Reply::error(__('messages.abortAction'));
+        }
+
+        $view = view('employees.ajax.import_progress', $this->data)->render();
+
+        return Reply::successWithData(__('messages.importUploadSuccess'), ['view' => $view]);
+    }
+
+    public function importProcess(ImportProcessRequest $request)
+    {
+        $batch = $this->importJobProcess($request, EmployeeImport::class, ImportEmployeeJob::class);
+
+        return Reply::successWithData(__('messages.importProcessStart'), ['batch' => $batch]);
+    }
+
 }

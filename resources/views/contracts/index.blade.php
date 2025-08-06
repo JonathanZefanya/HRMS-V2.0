@@ -1,208 +1,339 @@
-@extends('layouts.admin')
+@extends('layouts.app')
 
-@section('page-title')
-    {{ __(' Contract') }}
-@endsection
+@push('datatable-styles')
+    @include('sections.datatable_css')
+@endpush
 
-@section('breadcrumb')
-    <li class="breadcrumb-item"><a href="{{ route('dashboard') }}">{{ __('Home') }}</a></li>
-    <li class="breadcrumb-item">{{ __('Contract ') }}</li>
-@endsection
+@section('filter-section')
 
-
-@section('action-button')
-    <div class="row align-items-center m-1">
-        @can('Create Contract')
-            <a href="#" data-size="lg" data-url="{{ route('contract.create') }}" data-ajax-popup="true"
-                data-bs-toggle="tooltip" title="{{ __('Create') }}" data-title="{{ __('Create New Contract') }}"
-                class="btn btn-sm btn-primary">
-                <i class="ti ti-plus"></i>
-            </a>
-        @endcan
-    </div>
-@endsection
-
-@section('content')
-    <div class="row">
-        <div class='col-xl-12'>
-            <div class="row">
-                <div class="col-xl-3">
-                    <div class="card comp-card">
-                        <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col">
-                                    <h6 class="m-b-20">{{ __('Total Contracts') }}</h6>
-                                    <h3 class="text-primary">{{ $cnt_contract['total'] }}</h3>
-                                </div>
-                                <div class="badge theme-avtar bg-success">
-                                    <i class="fas fa-handshake text-white"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-xl-3">
-                    <div class="card comp-card">
-                        <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col">
-                                    <h6 class="m-b-20">{{ __('This Month Total Contracts') }}</h6>
-                                    <h3 class="text-info">{{ $cnt_contract['this_month'] }}</h3>
-                                </div>
-                                <div class="badge theme-avtar bg-info">
-                                    <i class="fas fa-handshake text-white"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-xl-3">
-                    <div class="card comp-card">
-                        <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col">
-                                    <h6 class="m-b-20">{{ __('This Week Total Contracts') }}</h6>
-                                    <h3 class="text-warning">{{ $cnt_contract['this_week'] }}</h3>
-                                </div>
-                                <div class="badge theme-avtar bg-warning">
-                                    <i class="fas fa-handshake text-white"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-xl-3">
-                    <div class="card comp-card">
-                        <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col">
-                                    <h6 class="m-b-20">{{ __('Last 30 Days Total Contracts') }}</h6>
-                                    <h3 class="text-danger">{{ $cnt_contract['last_30days'] }}</h3>
-                                </div>
-                                <div class="badge theme-avtar bg-danger">
-                                    <i class="fas fa-handshake text-white"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-xl-12">
-                    <div class="card table-card">
-                        <div class="card-header card-body table-border-style">
-                            <div class="table-responsive">
-                                <table class="table mb-0 pc-dt-simple" id="pc-dt-simple">
-                                    <thead>
-                                        <tr>
-                                            <th width="60px">{{ __('#') }}</th>
-                                            <th>{{ __('Employee Name') }}</th>
-                                            <th>{{ __('subject') }}</th>
-                                            <th>{{ __('Value') }}</th>
-                                            <th>{{ __('Type') }}</th>
-                                            <th>{{ __('Start Date') }}</th>
-                                            <th>{{ __('End Date') }}</th>
-                                            <th>{{ __('Status') }}</th>
-                                            <th width="150px">{{ __('Action') }}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach ($contracts as $contract)
-                                            <tr>
-                                                <td class="Id">
-                                                    {{-- @can('View contract') --}}
-                                                    <a href="{{ route('contract.show', \Illuminate\Support\Facades\Crypt::encrypt($contract->id)) }}"
-                                                        class="btn btn-outline-primary">{{ Auth::user()->contractNumberFormat($contract->id) }}</a>
-                                                    {{-- @else --}}
-                                                    {{-- {{ \Auth::User()->contractNumberFormat($contract->id) }} --}}
-                                                    {{-- @endcan --}}
-                                                </td>
-                                                <td>{{ $contract->employee->name }}</td>
-                                                <td>{{ $contract->subject }}</td>
-                                                <td>{{ Auth::user()->priceFormat($contract->value) }}</td>
-                                                <td>{{ $contract->contract_type->name }}</td>
-                                                <td>{{ Auth::user()->dateFormat($contract->start_date) }}</td>
-                                                <td>{{ Auth::user()->dateFormat($contract->end_date) }}</td>
-                                                <td>
-                                                    @if ($contract->status == 'accept')
-                                                        <span
-                                                            class="status_badge badge bg-primary p-2 px-3 contract-status">{{ __('Accept') }}</span>
-                                                    @elseif($contract->status == 'decline')
-                                                        <span
-                                                            class="status_badge badge bg-danger p-2 px-3 contract-status">{{ __('Decline') }}</span>
-                                                    @elseif($contract->status == 'pending')
-                                                        <span
-                                                            class="status_badge badge bg-warning p-2 px-3 contract-status">{{ __('Pending') }}</span>
-                                                    @endif
-                                                </td>
-                                                <td class="Action">
-                                                    <div class="dt-buttons">
-                                                    <span>
-                                                        @can('Create Contract')
-                                                            {{-- @if ($contract->status == 'accept') --}}
-                                                            <div class="action-btn bg-primary me-2">
-                                                                <a href="#" data-size="lg"
-                                                                    data-url="{{ route('contracts.copy', $contract->id) }}"
-                                                                    data-ajax-popup="true"
-                                                                    data-title="{{ __('Copy Contract') }}"
-                                                                    class="mx-3 btn btn-sm d-inline-flex align-items-center"
-                                                                    data-bs-toggle="tooltip" data-bs-placement="top"
-                                                                    title="{{ __('Duplicate') }}"><span class="text-white"><i
-                                                                        class="ti ti-copy"></i></span></a>
-                                                            </div>
-                                                            {{-- @endif --}}
-                                                        @endcan
-
-                                                        {{-- @if (\Auth::user()->type == 'company' || \Auth::user()->type == 'hr' || \Auth::user()->type == 'employee') --}}
-                                                        <div class="action-btn bg-warning me-2">
-                                                            <a href="{{ route('contract.show', \Illuminate\Support\Facades\Crypt::encrypt($contract->id)) }}"
-                                                                class="mx-3 btn btn-sm d-inline-flex align-items-center"
-                                                                data-bs-toggle="tooltip" data-bs-placement="top"
-                                                                title="{{ __('View Contract') }}"><span class="text-white"><i
-                                                                    class="ti ti-eye"></i></span></a>
-                                                        </div>
-                                                        {{-- @endif --}}
-
-                                                        @can('Edit Contract')
-                                                            <div class="action-btn bg-info me-2">
-                                                                <a href="#" data-size="lg"
-                                                                    data-url="{{ URL::to('contract/' . $contract->id . '/edit') }}"
-                                                                    data-ajax-popup="true"
-                                                                    data-title="{{ __('Edit Contract') }}"
-                                                                    class="mx-3 btn btn-sm d-inline-flex align-items-center"
-                                                                    data-bs-toggle="tooltip" data-bs-placement="top"
-                                                                    title="{{ __('Edit') }}"><span class="text-white"><i
-                                                                        class="ti ti-pencil"></i></span></a>
-                                                            </div>
-                                                        @endcan
-
-                                                        @can('Delete Contract')
-                                                            <div class="action-btn bg-danger">
-                                                                {!! Form::open(['method' => 'DELETE', 'route' => ['contract.destroy', $contract->id]]) !!}
-                                                                <a href="#!"
-                                                                    class="mx-3 btn btn-sm d-inline-flex align-items-center bs-pass-para"
-                                                                    data-bs-toggle="tooltip" data-bs-placement="top"
-                                                                    title="{{ __('Delete') }}">
-                                                                    <span class="text-white"> <i
-                                                                            class="ti ti-trash"></i></span>
-                                                                </a>
-                                                                {!! Form::close() !!}
-                                                            </div>
-                                                        @endcan
-                                                    </span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    <x-filters.filter-box>
+        <!-- DATE START -->
+        <div class="select-box d-flex pr-2 border-right-grey border-right-grey-sm-0">
+            <p class="mb-0 pr-2 f-14 text-dark-grey d-flex align-items-center">@lang('app.duration')</p>
+            <div class="select-status d-flex">
+                <input type="text"
+                    class="position-relative text-dark form-control border-0 p-2 text-left f-14 f-w-500 border-additional-grey"
+                    id="datatableRange" placeholder="@lang('placeholders.dateRange')">
             </div>
         </div>
-    </div>
+        <!-- DATE END -->
+
+        @if (!in_array('client', user_roles()))
+            <!-- CLIENT START -->
+            <div class="select-box d-flex py-2 px-lg-2 px-md-2 px-0 border-right-grey border-right-grey-sm-0">
+                <p class="mb-0 pr-2 f-14 text-dark-grey d-flex align-items-center">@lang('app.client')</p>
+                <div class="select-status">
+                    <select class="form-control select-picker" name="client" id="client" data-live-search="true"
+                        data-size="8">
+                        @if (!in_array('client', user_roles()))
+                            <option value="all">@lang('app.all')</option>
+                        @endif
+                        @foreach ($clients as $client)
+                            <x-user-option :user="$client" />
+                        @endforeach
+                    </select>
+                </div>
+            </div>
+        @endif
+
+        <!-- CLIENT END -->
+        <!-- STATUS START -->
+        <div class="select-box d-flex py-2 px-lg-2 px-md-2 px-0 border-right-grey border-right-grey-sm-0">
+            <p class="mb-0 pr-2 f-14 text-dark-grey d-flex align-items-center">@lang('modules.contracts.contractType')</p>
+            <div class="select-status">
+                <select class="form-control select-picker" name="contract_type" id="contract_type" data-live-search="true"
+                    data-size="8">
+                    <option value="all">@lang('app.all')</option>
+                    @foreach ($contractTypes as $item)
+                        <option value="{{ $item->id }}">{{ $item->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+        </div>
+        <!-- STATUS END -->
+
+        <!-- SEARCH BY TASK START -->
+        <div class="task-search d-flex  py-1 px-lg-3 px-0 border-right-grey align-items-center">
+            <form class="w-100 mr-1 mr-lg-0 mr-md-1 ml-md-1 ml-0 ml-lg-0">
+                <div class="input-group bg-grey rounded">
+                    <div class="input-group-prepend">
+                        <span class="input-group-text border-0 bg-additional-grey">
+                            <i class="fa fa-search f-13 text-dark-grey"></i>
+                        </span>
+                    </div>
+                    <input type="text" class="form-control f-14 p-1 border-additional-grey" id="search-text-field"
+                        placeholder="@lang('app.startTyping')">
+                </div>
+            </form>
+        </div>
+        <!-- SEARCH BY TASK END -->
+
+        <!-- RESET START -->
+        <div class="select-box d-flex py-1 px-lg-2 px-md-2 px-0">
+            <x-forms.button-secondary class="btn-xs d-none" id="reset-filters" icon="times-circle">
+                @lang('app.clearFilters')
+            </x-forms.button-secondary>
+        </div>
+        <!-- RESET END -->
+    </x-filters.filter-box>
+
 @endsection
+
+@php
+    $addContractPermission = user()->permission('add_contract');
+    $manageContractTemplatePermission = user()->permission('manage_contract_template');
+
+@endphp
+
+@section('content')
+    <!-- CONTENT WRAPPER START -->
+    <div class="content-wrapper">
+        <!-- Add Task Export Buttons Start -->
+        <div class="d-flex justify-content-between action-bar">
+
+            <div id="table-actions" class="d-flex align-items-center">
+                @if (in_array('clients', user_modules()) && ($addContractPermission == 'all' || $addContractPermission == 'added'))
+                    <x-forms.link-primary :link="route('contracts.create')" class="mr-3 openRightModal" icon="plus">
+                        @lang('modules.contracts.createContract')
+                    </x-forms.link-primary>
+                @endif
+
+                @if (in_array('clients', user_modules()) && ($manageContractTemplatePermission == 'all' || $manageContractTemplatePermission == 'added'))
+                    <x-forms.link-secondary :link="route('contract-template.index')" class="mr-3 mb-2 mb-lg-0 mb-md-0 float-left"
+                        icon="layer-group">
+                        @lang('app.menu.contractTemplate')
+                    </x-forms.link-secondary>
+                @endif
+            </div>
+
+            @if (!in_array('client', user_roles()))
+                <x-datatable.actions>
+                    <div class="select-status mr-3 pl-3">
+                        <select name="action_type" class="form-control select-picker" id="quick-action-type" disabled>
+                            <option value="">@lang('app.selectAction')</option>
+                            <option value="delete">@lang('app.delete')</option>
+                        </select>
+                    </div>
+                </x-datatable.actions>
+            @endif
+            {{--
+            <div id="sign-modals" class="modal fade sign-modal" tabindex="-1" role="dialog" aria-hidden="true">
+                <div class="modal-dialog d-flex justify-content-center align-items-center modal-xl">
+                    <div class="modal-content">
+                        @include('contracts.companysign.sign')
+                    </div>
+                </div>
+            </div> --}}
+
+        </div>
+        <!-- Add Task Export Buttons End -->
+
+        <!-- Task Box Start -->
+        <div class="d-flex flex-column w-tables rounded mt-3 bg-white table-responsive">
+
+            {!! $dataTable->table(['class' => 'table table-hover border-0 w-100']) !!}
+
+        </div>
+        <!-- Task Box End -->
+    </div>
+    <!-- CONTENT WRAPPER END -->
+@endsection
+
+@push('scripts')
+    @include('sections.datatable_js')
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@2.3.2/dist/signature_pad.min.js"></script>
+
+    <script>
+        $('#contracts-table').on('preXhr.dt', function(e, settings, data) {
+            var dateRangePicker = $('#datatableRange').data('daterangepicker');
+            var startDate = $('#datatableRange').val();
+
+            if (startDate == '') {
+                startDate = null;
+                endDate = null;
+            } else {
+                startDate = dateRangePicker.startDate.format('{{ company()->moment_date_format }}');
+                endDate = dateRangePicker.endDate.format('{{ company()->moment_date_format }}');
+            }
+
+            var projectID = $('#filter_project_id').val();
+            if (!projectID) {
+                projectID = 0;
+            }
+            var contract_type = $('#contract_type').val();
+            var client = $('#client').val();
+            var searchText = $('#search-text-field').val();
+            data['startDate'] = startDate;
+            data['endDate'] = endDate;
+            data['contract_type'] = contract_type;
+            data['client'] = client;
+            data['searchText'] = searchText;
+
+        });
+        const showTable = () => {
+            window.LaravelDataTables["contracts-table"].draw(true);
+        }
+
+        $('#client, #contract_type').on('change keyup', function() {
+            if ($('#contract_type').val() != "all") {
+                $('#reset-filters').removeClass('d-none');
+                showTable();
+            } else if ($('#client').val() != "all") {
+                $('#reset-filters').removeClass('d-none');
+                showTable();
+            } else {
+                $('#reset-filters').addClass('d-none');
+                showTable();
+            }
+        });
+
+        $('#search-text-field').on('keyup', function() {
+            if ($('#search-text-field').val() != "") {
+                $('#reset-filters').removeClass('d-none');
+                showTable();
+            }
+        });
+
+        $('#reset-filters').click(function() {
+            $('#filter-form')[0].reset();
+            $('.filter-box .select-picker').selectpicker("refresh");
+            $('#reset-filters').addClass('d-none');
+            showTable();
+        });
+
+        $('#quick-action-type').change(function() {
+            const actionValue = $(this).val();
+            if (actionValue != '') {
+                $('#quick-action-apply').removeAttr('disabled');
+
+                if (actionValue == 'change-status') {
+                    $('.quick-action-field').addClass('d-none');
+                    $('#change-status-action').removeClass('d-none');
+                } else {
+                    $('.quick-action-field').addClass('d-none');
+                }
+            } else {
+                $('#quick-action-apply').attr('disabled', true);
+                $('.quick-action-field').addClass('d-none');
+            }
+        });
+
+        $('#quick-action-apply').click(function() {
+            const actionValue = $('#quick-action-type').val();
+            if (actionValue == 'delete') {
+                Swal.fire({
+                    title: "@lang('messages.sweetAlertTitle')",
+                    text: "@lang('messages.recoverRecord')",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    focusConfirm: false,
+                    confirmButtonText: "@lang('messages.confirmDelete')",
+                    cancelButtonText: "@lang('app.cancel')",
+                    customClass: {
+                        confirmButton: 'btn btn-primary mr-3',
+                        cancelButton: 'btn btn-secondary'
+                    },
+                    showClass: {
+                        popup: 'swal2-noanimation',
+                        backdrop: 'swal2-noanimation'
+                    },
+                    buttonsStyling: false
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        applyQuickAction();
+                    }
+                });
+
+            } else {
+                applyQuickAction();
+            }
+        });
+
+        $('body').on('click', '.delete-table-row', function() {
+            var id = $(this).data('contract-id');
+            Swal.fire({
+                title: "@lang('messages.sweetAlertTitle')",
+                text: "@lang('messages.recoverRecord')",
+                icon: 'warning',
+                showCancelButton: true,
+                focusConfirm: false,
+                confirmButtonText: "@lang('messages.confirmDelete')",
+                cancelButtonText: "@lang('app.cancel')",
+                customClass: {
+                    confirmButton: 'btn btn-primary mr-3',
+                    cancelButton: 'btn btn-secondary'
+                },
+                showClass: {
+                    popup: 'swal2-noanimation',
+                    backdrop: 'swal2-noanimation'
+                },
+                buttonsStyling: false
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    var url = "{{ route('contracts.destroy', ':id') }}";
+                    url = url.replace(':id', id);
+
+                    var token = "{{ csrf_token() }}";
+
+                    $.easyAjax({
+                        type: 'POST',
+                        url: url,
+                        data: {
+                            '_token': token,
+                            '_method': 'DELETE'
+                        },
+                        success: function(response) {
+                            if (response.status == "success") {
+                                showTable();
+                            }
+                        }
+                    });
+                }
+            });
+        });
+
+        const applyQuickAction = () => {
+            var rowdIds = $("#contracts-table input:checkbox:checked").map(function() {
+                return $(this).val();
+            }).get();
+
+            var url = "{{ route('contracts.apply_quick_action') }}?row_ids=" + rowdIds;
+
+            $.easyAjax({
+                url: url,
+                container: '#quick-action-form',
+                type: "POST",
+                disableButton: true,
+                buttonSelector: "#quick-action-apply",
+                data: $('#quick-action-form').serialize(),
+                success: function(response) {
+                    if (response.status == 'success') {
+                        showTable();
+                        resetActionButtons();
+                        deSelectAll();
+                        $('#quick-action-form').hide();
+                    }
+                }
+            })
+        };
+
+        $(document).ready(function() {
+            @if (!is_null(request('start')) && !is_null(request('end')))
+                $('#datatableRange').val('{{ request('start') }}' +
+                    ' @lang('app.to') ' + '{{ request('end') }}');
+                $('#datatableRange').data('daterangepicker').setStartDate("{{ request('start') }}");
+                $('#datatableRange').data('daterangepicker').setEndDate("{{ request('end') }}");
+                showTable();
+            @endif
+        });
+
+        $('body').on('click', '.sign-modal', function() {
+            var id = $(this).data('contract-id');
+            url = "{{ route('companySignStore.sign', ':id') }}";
+            url = url.replace(':id', id);
+            console.log(url);
+            $(MODAL_LG + ' ' + MODAL_HEADING).html('...');
+            $.ajaxModal(MODAL_LG, url);
+        });
+    </script>
+@endpush

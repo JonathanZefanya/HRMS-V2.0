@@ -1,22 +1,10 @@
-<?php
-
+<?php 
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | Password Reset Language Lines
-    |--------------------------------------------------------------------------
-    |
-    | The following language lines are the default lines which match reasons
-    | that are given by the password broker for a password update attempt
-    | has failed, such as for an invalid token or invalid new password.
-    |
-    */
-
-    'password' => 'Passwords must be at least eight characters and match the confirmation.',
-    'reset' => 'Your password has been reset!',
-    'sent' => 'We have e-mailed your password reset link!',
-    'token' => 'This password reset token is invalid.',
-    'user' => "We can't find a user with that e-mail address.",
-    'throttled' => 'You have requested password reset recently, please check your email.',
+  'password' => 'Wachtwoorden moeten minimaal zes tekens lang zijn en overeenkomen met de bevestiging.',
+  'reset' => 'Je wachtwoord is gereset!. Een ogenblik geduld, u wordt over een tijdje teruggeleid naar de inlogpagina',
+  'sent' => 'Controleer uw e-mailaccount. We hebben uw link voor het opnieuw instellen van uw wachtwoord per e-mail verzonden!',
+  'token' => 'Dit token voor het opnieuw instellen van het wachtwoord is ongeldig.',
+  'user' => 'We kunnen geen gebruiker met dat e-mailadres vinden.',
+  'throttled' => 'Wacht alstublieft voordat u het opnieuw probeert.',
+  'notMatch' => 'Het opgegeven wachtwoord komt niet overeen met uw huidige wachtwoord.',
 ];

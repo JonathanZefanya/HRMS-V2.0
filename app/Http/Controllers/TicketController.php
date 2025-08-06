@@ -2,392 +2,753 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Employee;
-use App\Mail\TicketSend;
-use App\Models\Ticket;
-use App\Models\TicketReply;
 use App\Models\User;
-use App\Models\Utility;
+use App\Helper\Reply;
+use App\Models\Ticket;
+use App\Models\TicketTag;
+use App\Models\TicketType;
+use App\Models\TicketGroup;
+use App\Models\TicketSettingForAgents;
+use App\Models\TicketReply;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Mail;
-
-class TicketController extends Controller
+use App\Models\TicketChannel;
+use App\Models\TicketTagList;
+use App\Models\TicketAgentGroups;
+use Illuminate\Support\Facades\DB;
+use App\DataTables\TicketDataTable;
+use App\Models\TicketReplyTemplate;
+use App\Http\Requests\Tickets\StoreTicket;
+use App\Http\Requests\Tickets\UpdateTicket;
+use App\Http\Requests\Tickets\UpdateTicketDetailRequest;
+use App\Models\Project;
+use App\Scopes\ActiveScope;
+use App\Models\ClientContact;
+use App\Helper\UserService;
+class TicketController extends AccountBaseController
 {
-    public function index()
+
+    public function __construct()
     {
-        if (\Auth::user()->type == 'company' || \Auth::user()->type == 'hr') {
-            $countTicket      = Ticket::where('created_by', '=', \Auth::user()->creatorId())->count();
-            $countOpenTicket  = Ticket::where('status', '=', 'open')->where('created_by', '=', \Auth::user()->creatorId())->count();
-            $countonholdTicket  = Ticket::where('status', '=', 'onhold')->where('created_by', '=', \Auth::user()->creatorId())->count();
-            $countCloseTicket = Ticket::where('status', '=', 'close')->where('created_by', '=', \Auth::user()->creatorId())->count();
-        }else {
-            $countTicket      = Ticket::where('employee_id', '=', \Auth::user()->id)->orWhere('ticket_created', \Auth::user()->id)->count();
-            $countOpenTicket  = Ticket::where('status', '=', 'open')->where('employee_id', '=', \Auth::user()->id)->count();
-            $countonholdTicket  = Ticket::where('status', '=', 'onhold')->where('employee_id', '=', \Auth::user()->id)->count();
-            $countCloseTicket = Ticket::where('status', '=', 'close')->where('employee_id', '=', \Auth::user()->id)->count();
+        parent::__construct();
+        $this->pageTitle = 'app.menu.tickets';
+        $this->middleware(function ($request, $next) {
+            abort_403(!in_array('tickets', $this->user->modules));
+
+            return $next($request);
+        });
+    }
+
+    public function index(TicketDataTable $dataTable)
+    {
+        $this->viewPermission = user()->permission('view_tickets');
+        abort_403(!in_array($this->viewPermission, ['all', 'added', 'owned', 'both']));
+
+        $managePermission = user()->permission('manage_ticket_agent');
+
+        $id = UserService::getUserId();
+
+        if (!request()->ajax()) {
+            $this->channels = TicketChannel::all();
+            $this->groups = $managePermission == 'none' ? null : TicketGroup::with(['enabledAgents' => function ($q) use ($managePermission, $id) {
+
+                if ($managePermission == 'added') {
+                    $q->where('added_by', $id);
+                }
+                elseif ($managePermission == 'owned') {
+                    $q->where('agent_id', $id);
+                }
+                elseif ($managePermission == 'both') {
+                    $q->where('agent_id', $id)->orWhere('added_by', $id);
+                }
+                else {
+                    $q->get();
+                }
+
+            }, 'enabledAgents.user'])->get();
+
+            $this->types = TicketType::all();
+            $this->tags = TicketTagList::all();
+            $this->projects = Project::allProjects();
         }
 
-        $arr = [];
-        array_push($arr, $countTicket, $countOpenTicket, $countonholdTicket, $countCloseTicket);
-        $ticket_arr = json_encode($arr);
+        return $dataTable->render('tickets.index', $this->data);
 
-        if (\Auth::user()->can('Manage Ticket')) {
-            $user = Auth::user();
-            if ($user->type == 'employee') {
-                $tickets = Ticket::where('employee_id', '=', \Auth::user()->id)->orWhere('ticket_created', \Auth::user()->id)->get();
-            } else {
-                $tickets = Ticket::select('tickets.*')->join('users', 'tickets.created_by', '=', 'users.id')->where('users.created_by', '=', \Auth::user()->creatorId())->orWhere('tickets.created_by', \Auth::user()->creatorId())->get();
-            }
+    }
 
-            return view('ticket.index', compact('tickets', 'countTicket', 'countOpenTicket', 'countCloseTicket', 'countonholdTicket', 'ticket_arr'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+    public function getContacts(Request $request)
+    {
+        $contacts = ClientContact::query()
+            ->when(($request->requesterType == 'client' && $request->clientId), function ($query) use ($request) {
+                $query->where('user_id', $request->clientId);
+            })
+            ->get();
+
+        return Reply::dataOnly(['contacts' => $contacts]);
+    }
+
+    public function applyQuickAction(Request $request)
+    {
+        switch ($request->action_type) {
+        case 'delete':
+            $this->deleteRecords($request);
+
+            return Reply::success(__('messages.deleteSuccess'));
+        case 'change-status':
+            $this->changeBulkStatus($request);
+
+            return Reply::success(__('messages.updateSuccess'));
+        default:
+            return Reply::error(__('messages.selectAction'));
         }
+    }
+
+    protected function deleteRecords($request)
+    {
+        abort_403(user()->permission('delete_tickets') != 'all');
+
+        Ticket::whereIn('id', explode(',', $request->row_ids))->delete();
+    }
+
+    protected function changeBulkStatus($request)
+    {
+        abort_403(user()->permission('edit_tickets') != 'all');
+
+        Ticket::whereIn('id', explode(',', $request->row_ids))->update(['status' => $request->status]);
     }
 
     public function create()
     {
-        if (\Auth::user()->can('Create Ticket')) {
-            if (\Auth::user()->type != 'employee') {
-                $employees = User::where('created_by', '=', \Auth::user()->creatorId())->where('type', '=', 'employee')->get()->pluck('name', 'id');
-            } else {
-                $employees = User::where('created_by', '=', \Auth::user()->creatorId())->where('type', '=', 'employee')->first();
-            }
+        $this->addPermission = user()->permission('add_tickets');
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
 
-            return view('ticket.create', compact('employees'));
-        } else {
-            return response()->json(['error' => __('Permission denied.')], 401);
+        $this->groups = TicketGroup::with('enabledAgents', 'enabledAgents.user')->get();
+        $this->types = TicketType::all();
+        $this->channels = TicketChannel::all();
+        $this->templates = TicketReplyTemplate::all();
+        $this->employees = User::allEmployees(null, true, ($this->addPermission == 'all' ? 'all' : null));
+        $this->clients = User::allClients();
+        $this->countries = countries();
+        $this->lastTicket = Ticket::orderBy('id', 'desc')->first();
+        $this->pageTitle = __('modules.tickets.addTicket');
+
+        $ticket = new Ticket();
+
+        $getCustomFieldGroupsWithFields = $ticket->getCustomFieldGroupsWithFields();
+
+        if ($getCustomFieldGroupsWithFields) {
+            $this->fields = $getCustomFieldGroupsWithFields->fields;
         }
+
+
+        if (request()->default_client) {
+            $this->client = User::find(request()->default_client);
+        }
+
+        if (isset(request()->default_assign)) {
+            $this->defaultAssign = User::findOrFail(request()->default_assign);
+        }
+
+        $this->view = 'tickets.ajax.create';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('tickets.create', $this->data);
+
     }
 
-    public function store(Request $request)
+    public function store(StoreTicket $request)
     {
-        if (\Auth::user()->can('Create Ticket')) {
 
-            $validator = \Validator::make(
-                $request->all(),
-                [
-                    'title' => 'required',
-                    'priority' => 'required',
-                    'end_date' => 'required',
-                    'employee_id' => 'required',
-                ]
-            );
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
+        $id = UserService::getUserId();
 
-                return redirect()->back()->with('error', $messages->first());
+        $ticket = new Ticket();
+        $ticket->subject = $request->subject;
+        $ticket->status = 'open';
+
+        if (user()->is_client_contact == 1) {
+            $ticket->user_id = $id;
+        } else {
+            $ticket->user_id = ($request->requester_type == 'employee') ? $request->user_id : ($request->client_contact_id ?: $request->client_id);
+        }
+
+        $ticket->agent_id = $request->agent_id;
+        $ticket->type_id = $request->type_id;
+        $ticket->priority = $request->priority;
+        $ticket->channel_id = $request->channel_id;
+        $ticket->group_id = $request->group_id;
+        $ticket->project_id = $request->project_id;
+        $ticket->save();
+
+        // Save first message
+        $reply = new TicketReply();
+        $reply->message = trim_editor($request->description);
+        $reply->ticket_id = $ticket->id;
+        $reply->user_id = $id; // Current logged in user
+        $reply->added_by = user()->id;
+        $reply->is_description = true;
+        $reply->save();
+
+        // To add custom fields data
+        if ($request->custom_fields_data) {
+            $ticket->updateCustomFieldData($request->custom_fields_data);
+        }
+
+        // Save tags
+        $tags = collect(json_decode($request->tags))->pluck('value');
+
+        foreach ($tags as $tag) {
+            $tag = TicketTagList::firstOrCreate([
+                'tag_name' => $tag
+            ]);
+            $ticket->ticketTags()->attach($tag);
+        }
+
+        // Log search
+        $this->logSearchEntry($ticket->ticket_number, $ticket->subject, 'tickets.show', 'ticket');
+
+        $redirectUrl = urldecode($request->redirect_url);
+
+        if ($redirectUrl == '') {
+            $redirectUrl = route('tickets.index');
+        }
+
+        return Reply::successWithData(__('messages.recordSaved'), ['replyID' => $reply->id, 'redirectUrl' => $redirectUrl]);
+    }
+
+    public function show($ticketNumber)
+    {
+        $managePermission = user()->permission('manage_ticket_agent');
+        $this->ticket = Ticket::with('project', 'reply.user.employeeDetail.designation:id,name', 'reply.files')
+            ->where('ticket_number', $ticketNumber)
+            ->firstOrFail();
+
+        $userid = UserService::getUserId();
+        $userAssignedInGroup = false;
+        $this->isEditable = false;
+        $userAssignedInGroup = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+            $query->where('agent_id', $userid)->orWhereNull('agent_id');
+        })->exists();
+
+        if($userAssignedInGroup == false){
+
+            abort_403(!$this->ticket->canViewTicket());
+        }else{
+
+            $ticketSetting = TicketSettingForAgents::first();
+            if($ticketSetting?->ticket_scope == 'group_tickets'){
+
+                $userGroupIds = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+                    $query->where('agent_id', $userid);
+                })->pluck('id')->toArray();
+
+                $ticketSettingGroupIds = is_array($ticketSetting?->group_id) ? $ticketSetting?->group_id : explode(',', $ticketSetting?->group_id);
+                $commonGroupIds = array_intersect($userGroupIds, $ticketSettingGroupIds);
+
+                if($commonGroupIds && !in_array($this->ticket->group_id, $commonGroupIds)){
+
+                    abort_403(!$this->ticket->canViewTicket());
+                }else{
+                    $this->isEditable = true;
+                }
+            }elseif($ticketSetting?->ticket_scope == 'assigned_tickets'){
+                $this->isEditable = true;
+                abort_403(!$this->ticket->canViewTicket());
+            }elseif($ticketSetting?->ticket_scope == 'all_tickets'){
+                $this->isEditable = true;
+            }
+        };
+
+        $this->ticket = $this->ticket->withCustomFields();
+        $this->pageTitle = __('app.menu.ticket') . '#' . $this->ticket->ticket_number;
+
+        $userData = [];
+        $groups = TicketGroup::with('enabledAgents', 'enabledAgents.user')->findOrfail($this->ticket->group_id);
+
+        $users = User::withoutGlobalScope(ActiveScope::class)->findOrFail($this->ticket->user_id);
+
+        foreach ($groups->enabledAgents as $agent) {
+            $user = $agent->user;
+            $url = route('employees.show', [$user->id]);
+
+            $userData[] = ['id' => $user->id, 'value' => $user->name, 'image' => $user->image_url, 'link' => $url];
+        }
+
+        $url = route('employees.show', [$users->id]);
+        $userData[] = ['id' => $users->id, 'value' => $users->name, 'image' => $users->image_url, 'link' => $url];
+        $this->userData = $userData;
+
+        $this->groups = TicketGroup::with('enabledAgents', 'enabledAgents.user')->get();
+        $this->types = TicketType::all();
+        $this->channels = TicketChannel::all();
+        $this->templates = TicketReplyTemplate::all();
+        $this->employees = User::withRole('employee')
+            ->join('employee_details', 'employee_details.user_id', '=', 'users.id')
+            ->leftJoin('designations', 'employee_details.designation_id', '=', 'designations.id')
+            ->select('users.id', 'users.company_id', 'users.name', 'users.email', 'users.created_at', 'users.image', 'designations.name as designation_name', 'users.email_notifications', 'users.mobile', 'users.country_id', 'users.status')->get();
+
+        $this->agents = TicketAgentGroups::query();
+
+        $id = UserService::getUserId();
+
+        if ($managePermission == 'added') {
+            $this->agents->where('added_by', $id);
+        } elseif ($managePermission == 'owned') {
+            $this->agents->where('agent_id', $id);
+        } elseif ($managePermission == 'both') {
+            $this->agents->where(function($q) use ($id) {
+                $q->where('agent_id', $id)
+                    ->orWhere('added_by', $id);
+            });
+        } elseif ($managePermission == 'none') {
+            $this->agents->where('agent_id', $id);
+        }
+
+        $this->agents = $this->agents->get();
+
+        $this->ticketAgents = $this->employees->whereIn('id', $this->agents->pluck('agent_id'));
+        // for the above
+        $this->ticketChart = $this->ticketChartData($this->ticket->user_id);
+
+        $getCustomFieldGroupsWithFields = $this->ticket->getCustomFieldGroupsWithFields();
+
+        if ($getCustomFieldGroupsWithFields) {
+            $this->fields = $getCustomFieldGroupsWithFields->fields;
+        }
+
+        return view('tickets.edit', $this->data);
+    }
+
+    public function ticketChartData($id)
+    {
+        $labels = ['open', 'pending', 'resolved', 'closed'];
+        $data['labels'] = [__('app.open'), __('app.pending'), __('app.resolved'), __('app.closed')];
+        $data['colors'] = ['#D30000', '#FCBD01', '#2CB100', '#1d82f5'];
+        $data['values'] = [];
+
+        foreach ($labels as $label) {
+            $data['values'][] = Ticket::where('user_id', $id)->where('status', $label)->count();
+        }
+
+        return $data;
+    }
+
+    public function update(UpdateTicket $request, $id)
+    {
+        $ticket = Ticket::findOrFail($id);
+        $ticket->status = $request->status;
+        $ticket->save();
+
+        $userid = UserService::getUserId();
+
+        if ($request->type == 'reply') {
+            $reply = new TicketReply();
+            $reply->message = $request->message;
+            $reply->ticket_id = $ticket->id;
+            $reply->user_id = $userid; // Current logged in user
+            $reply->type = $request->type;
+            $reply->added_by = user()->id;
+            $reply->save();
+
+            return Reply::successWithData(__('messages.ticketReplySuccess'), ['reply_id' => $reply->id]);
+        }
+
+        if ($request->type == 'note') {
+            $reply = new TicketReply();
+            $reply->message = $request->message2;
+            $reply->ticket_id = $ticket->id;
+            $reply->user_id = $userid; // Current logged in user
+            $reply->type = $request->type;
+            $reply->added_by = user()->id;
+            $reply->save();
+
+            $reply->users()->sync(request()->user_id);
+
+            return Reply::successWithData(__('messages.noteAddedSuccess'), ['reply_id' => $reply->id]);
+        }
+
+        return Reply::dataOnly(['status' => 'success']);
+    }
+
+    public function destroy($id)
+    {
+        $ticket = Ticket::findOrFail($id);
+
+        abort_403(!$ticket->canDeleteTicket());
+
+        Ticket::destroy($id);
+
+        return Reply::success(__('messages.deleteSuccess'));
+
+    }
+
+    public function editDetail($id)
+    {
+        $this->ticket = Ticket::findOrFail($id);
+        $this->reply = TicketReply::where('ticket_id', $id)->where('is_description', 1)->first();
+
+        return view('tickets.ajax.edit-ticket-detail', $this->data);
+    }
+
+    public function updateDetail(UpdateTicketDetailRequest $request, $id)
+    {
+        $ticket = Ticket::findOrFail($id);
+        $ticket->subject = $request->subject;
+        $ticket->save();
+        $description = trim(strip_tags($request->description));
+
+        if ($description && $request->ticket_reply_id) {
+            $ticketReply = TicketReply::findOrFail($request->ticket_reply_id);
+            $ticketReply->message = trim_editor($request->description);
+            $ticketReply->save();
+        }elseif ($description == '' && $request->ticket_reply_id != null) {
+
+            return Reply::error(__('messages.descriptionFieldRequired'));
+        }
+
+        return Reply::success(__('messages.updateSuccess'));
+    }
+
+    public function updateOtherData(Request $request, $id)
+    {
+        $ticket = Ticket::findOrFail($id);
+        $ticket->group_id = $request->group_id;
+        $ticket->type_id = $request->type_id;
+        $ticket->priority = $request->priority;
+        $ticket->channel_id = $request->channel_id;
+        $ticket->status = $request->status;
+
+        $agentGroupData = TicketAgentGroups::where('company_id', company()->id)
+            ->where('status', 'enabled')
+            ->where('group_id', request()->group_id)
+            ->pluck('agent_id')
+            ->toArray();
+
+        $ticketData = $ticket->where('company_id', company()->id)
+            ->where('group_id', request()->group_id)
+            ->whereIn('agent_id', $agentGroupData)
+            ->whereIn('status', ['open', 'pending'])
+            ->whereNotNull('agent_id')
+            ->pluck('agent_id')
+            ->toArray();
+
+        $diffAgent = array_diff($agentGroupData, $ticketData);
+
+        if (is_null(request()->agent_id)) {
+
+            if (!empty($diffAgent)) {
+                $ticket->agent_id = current($diffAgent);
+            }
+            else {
+                $agentDuplicateCount = array_count_values($ticketData);
+
+                if (!empty($agentDuplicateCount)) {
+                    $minVal = min($agentDuplicateCount);
+                    $agentId = array_search($minVal, $agentDuplicateCount);
+                    $ticket->agent_id = $agentId;
+                }
+
+            }
+        }
+        else {
+            $ticket->agent_id = request()->agent_id;
+        }
+
+        $ticket->save();
+
+        // Save tags
+        $tags = collect(json_decode($request->tags))->pluck('value');
+        TicketTag::where('ticket_id', $ticket->id)->delete();
+
+        foreach ($tags as $tag) {
+            $tag = TicketTagList::firstOrCreate([
+                'tag_name' => $tag
+            ]);
+            $ticket->ticketTags()->attach($tag);
+        }
+
+        return Reply::success(__('messages.updateSuccess'));
+    }
+
+    public function refreshCount(Request $request)
+    {
+        $viewPermission = user()->permission('view_tickets');
+
+        $tickets = Ticket::with('agent','group.enabledAgents');
+
+        if (!is_null($request->startDate) && $request->startDate != '') {
+            $startDate = companyToDateString($request->startDate);
+            $tickets->where(DB::raw('DATE(`created_at`)'), '>=', $startDate);
+        }
+
+        if (!is_null($request->endDate) && $request->endDate != '') {
+            $endDate = companyToDateString($request->endDate);
+            $tickets->where(DB::raw('DATE(`created_at`)'), '<=', $endDate);
+        }
+
+        $tagIds = is_array($request->tagId) ? $request->tagId : explode(',', $request->tagId);
+        $totalTagLists = TicketTagList::all();
+        $totaltags = ($totalTagLists->count() + 1) - count($tagIds);
+
+        if (is_array($request->tagId) && $request->tagId[0] !== 'all') {
+            $tickets->join('ticket_tags', 'ticket_tags.ticket_id', 'tickets.id')
+              ->whereIn('ticket_tags.tag_id', $tagIds)
+              ->groupBy('tickets.id');
+        } elseif(is_array($request->tagId) && $request->tagId[0] !== 'all' && $totaltags > 0){
+            $tickets->join('ticket_tags', 'ticket_tags.ticket_id', 'tickets.id')
+                ->whereIn('ticket_tags.tag_id', $tagIds)
+                ->groupBy('tickets.id');
+        } elseif(is_array($request->tagId) && $request->tagId[0] == 'all' && $totaltags > 0 && count($tagIds) !== 1){
+            $tickets->leftJoin('ticket_tags', 'ticket_tags.ticket_id', '=', 'tickets.id')
+                ->where(function ($query) use ($tagIds) {
+                    $query->whereIn('ticket_tags.tag_id', $tagIds)
+                        ->orWhereNull('ticket_tags.tag_id');
+                })->groupBy('tickets.id');
+        }elseif(is_array($request->tagId) && $request->tagId[0] == 'all' && count($tagIds) == 1){
+            $tickets->whereNotExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('ticket_tags')
+                        ->whereColumn('ticket_tags.ticket_id', 'tickets.id');
+                });
+        }
+
+        if (!is_null($request->agentId) && $request->agentId != 'all') {
+            $tickets->where('agent_id', '=', $request->agentId);
+        }
+
+        if (!is_null($request->priority) && $request->priority != 'all') {
+            $tickets->where('priority', '=', $request->priority);
+        }
+
+        if (!is_null($request->channelId) && $request->channelId != 'all') {
+            $tickets->where('channel_id', '=', $request->channelId);
+        }
+
+        if (!is_null($request->typeId) && $request->typeId != 'all') {
+            $tickets->where('type_id', '=', $request->typeId);
+        }
+
+        if (!is_null($request->groupId) && $request->groupId != 'all') {
+            $tickets->where('group_id', '=', $request->groupId);
+        }
+
+        if (!is_null($request->projectID) && $request->projectID != 'all') {
+            $tickets->whereHas('project', function ($q) use ($request) {
+                $q->withTrashed()->where('tickets.project_id', $request->projectID);
+            });
+        }
+
+        $userid = UserService::getUserId();
+
+        $userAssignedInGroup = false;
+        if(in_array('employee', user_roles()) && !in_array('admin', user_roles()) && !in_array('client', user_roles())){
+            $userAssignedInGroup = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+                $query->where('agent_id', $userid)->orWhereNull('agent_id');
+            })->exists();
+        }
+
+        if($userAssignedInGroup == false){
+
+            if ($viewPermission == 'added') {
+                $tickets->where('added_by', '=', $userid);
             }
 
-            $rand          = date('hms');
-            $ticket        = new Ticket();
-            $ticket->title = $request->title;
-            if (Auth::user()->type == "employee") {
-                $ticket->employee_id = \Auth::user()->id;
-            } else {
-                $ticket->employee_id = $request->employee_id;
+            if ($viewPermission == 'owned') {
+                $tickets->where(function ($query) use ($userid) {
+                    $query->where('user_id', '=', $userid)
+                        ->orWhere('agent_id', '=', $userid);
+                });
             }
 
-            $ticket->priority    = $request->priority;
-
-            $date1 = date("Y-m-d");
-            $date2 =  $request->end_date;
-            if ($date1 > $date2) {
-                return redirect()->back()->with('error', __('Please Select Today or After Date '));
-            } else {
-                $ticket->end_date = $request->end_date;
+            if ($viewPermission == 'both') {
+                $tickets->where(function ($query) use ($userid) {
+                    $query->where('user_id', '=', $userid)
+                        ->orWhere('added_by', '=', $userid)
+                        ->orWhere('agent_id', '=', $userid);
+                });
             }
-            $ticket->ticket_code = $rand;
-            $ticket->description = $request->description;
+        }else{
 
-            if (!empty($request->attachment)) {
-                $image_size = $request->file('attachment')->getSize();
+            $ticketSetting = TicketSettingForAgents::first();
 
-                $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-                if ($result == 1) {
-                    $filenameWithExt = $request->file('attachment')->getClientOriginalName();
-                    $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                    $extension       = $request->file('attachment')->getClientOriginalExtension();
-                    $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                    $dir = 'uploads/tickets/';
-                    $image_path = $dir . $fileNameToStore;
+            if($ticketSetting?->ticket_scope == 'group_tickets'){
 
-                    $url = '';
-                    $path = Utility::upload_file($request, 'attachment', $fileNameToStore, $dir, []);
-                    $ticket->attachment    = !empty($request->attachment) ? $fileNameToStore : '';
-                    if ($path['flag'] == 1) {
-                        $url = $path['url'];
-                    } else {
-                        return redirect()->back()->with('error', __($path['msg']));
-                    }
+                $userGroupIds = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+                    $query->where('agent_id', $userid);
+                })->pluck('id')->toArray();
+
+                $ticketSettingGroupIds = is_array($ticketSetting?->group_id) ? $ticketSetting?->group_id : explode(',', $ticketSetting?->group_id);
+
+                // Find the common group IDs
+                $commonGroupIds = array_intersect($userGroupIds, $ticketSettingGroupIds);
+
+                if($commonGroupIds){
+                    $tickets->where(function ($query) use ($commonGroupIds, $userid) {
+                        $query->where(function ($subQuery) use ($commonGroupIds, $userid) {
+                            // Conditions related to user and agent
+                            $subQuery->where('user_id', '=', $userid)
+                                ->orWhere('added_by', '=', $userid)
+                                ->orWhere('agent_id', '=', $userid)
+                                ->orWhere('agent_id', '!=', $userid)
+                                ->whereIn('group_id', $commonGroupIds);
+                        })
+                        // Add orWhere for tickets where agent_id is null
+                        ->orWhere(function ($subQuery) use ($commonGroupIds) {
+                            $subQuery->whereNull('agent_id')
+                                ->whereIn('group_id', $commonGroupIds);
+                        });
+                    });
+                }else{
+                    $tickets->where(function ($query) use ($userGroupIds, $userid) {
+                        $query->where(function ($subQuery) use ($userGroupIds, $userid) {
+                            // Conditions related to user and agent
+                            $subQuery->where('user_id', '=', $userid)
+                                ->orWhere('added_by', '=', $userid)
+                                ->orWhere('agent_id', '=', $userid)
+                                ->orWhere('agent_id', '!=', $userid)
+                                ->whereIn('group_id', $userGroupIds);
+                        })
+                        // Add orWhere for tickets where agent_id is null
+                        ->orWhere(function ($subQuery) use ($userGroupIds) {
+                            $subQuery->whereNull('agent_id')
+                                ->whereIn('group_id', $userGroupIds);
+                        });
+                    });
                 }
             }
 
-            $ticket->ticket_created = \Auth::user()->id;
-            $ticket->created_by     = \Auth::user()->creatorId();
-            $ticket->status         = $request->status;
-            $ticket->save();
-
-            //slack
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $emp = User::where('id', $request->employee_id)->first();
-            if (isset($setting['ticket_notification']) && $setting['ticket_notification'] == 1) {
-                // $msg = ("New Support ticket created of") . ' ' . $request->priority . ' ' . __("priority for") . ' ' . $emp->name . ' ';
-
-                $uArr = [
-                    'ticket_priority' => $request->priority,
-                    'employee_name' => $emp->name,
-                ];
-                Utility::send_slack_msg('new_ticket', $uArr);
+            if($ticketSetting?->ticket_scope == 'assigned_tickets'){
+                $tickets->where(function ($query) use ($userid) {
+                    $query->where('agent_id', '=', $userid)
+                        ->orWhere('user_id', '=', $userid)
+                        ->orWhere('added_by', '=', $userid);
+                });
             }
+        }
 
-            //telegram
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $emp = User::where('id', $request->employee_id)->first();
-            if (isset($setting['telegram_ticket_notification']) && $setting['telegram_ticket_notification'] == 1) {
-                // $msg = ("New Support ticket created of") . ' ' . $request->priority . ' ' . __("priority for") . ' ' . $emp->name . ' ';
+        $tickets = $tickets->get();
 
-                $uArr = [
-                    'ticket_priority' => $request->priority,
-                    'employee_name' => $emp->name,
-                ];
+        $openTickets = $tickets->filter(function ($value, $key) {
+            return $value->status == 'open';
+        })->count();
 
-                Utility::send_telegram_msg('new_ticket', $uArr);
-            }
+        $pendingTickets = $tickets->filter(function ($value, $key) {
+            return $value->status == 'pending';
+        })->count();
 
-            // twilio 
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $emp = Employee::where('user_id', $request->employee_id)->first();
-            if (isset($setting['twilio_ticket_notification']) && $setting['twilio_ticket_notification'] == 1) {
-                // $msg = ("New Support ticket created of") . ' ' . $request->priority . ' ' . __("priority for") . ' ' . $emp->name . ' ';
+        $resolvedTickets = $tickets->filter(function ($value, $key) {
+            return $value->status == 'resolved';
+        })->count();
 
-                $uArr = [
-                    'ticket_priority' => $request->priority,
-                    'employee_name' => $emp->name,
-                ];
+        $closedTickets = $tickets->filter(function ($value, $key) {
+            return $value->status == 'closed';
+        })->count();
 
-                Utility::send_twilio_msg($emp->phone, 'new_ticket', $uArr);
-            }
+        $totalTickets = $tickets->count();
 
-            $setings = Utility::settings();
+        $ticketData = [
+            'totalTickets' => $totalTickets,
+            'closedTickets' => $closedTickets,
+            'openTickets' => $openTickets,
+            'pendingTickets' => $pendingTickets,
+            'resolvedTickets' => $resolvedTickets
+        ];
 
-            if ($setings['new_ticket'] == 1) {
-                $employee = Employee::where('user_id', '=', $ticket->employee_id)->first();
+        return Reply::dataOnly($ticketData);
+    }
 
-                $uArr = [
-                    'ticket_title' => $ticket->title,
-                    'ticket_name'  => $employee->name,
-                    'ticket_code' => $rand,
-                    'ticket_description' => $request->description,
-                ];
+    public function changeStatus(Request $request)
+    {
+        $ticket = Ticket::findOrFail($request->ticketId);
 
-                $resp = Utility::sendEmailTemplate('new_ticket', [$employee->email], $uArr);
-                // return redirect()->route('ticket.index')->with('success', __('Ticket successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-            }
+        $userid = UserService::getUserId();
+        $userAssignedInGroup = false;
+        $this->isEditable = false;
+        $userAssignedInGroup = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+            $query->where('agent_id', $userid)->orWhereNull('agent_id');
+        })->exists();
 
-            //webhook
-            $module = 'New Ticket';
-            $webhook =  Utility::webhookSetting($module);
-            if ($webhook) {
-                $parameter = json_encode($ticket);
-                // 1 parameter is  URL , 2 parameter is data , 3 parameter is method
-                $status = Utility::WebhookCall($webhook['url'], $parameter, $webhook['method']);
-                if ($status == true) {
-                    return redirect()->route('ticket.index')->with('success', __('Ticket successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-                } else {
-                    return redirect()->back()->with('error', __('Webhook call failed.'));
+        if($userAssignedInGroup == false){
+
+            abort_403(!$ticket->canEditTicket());
+        }else{
+
+            $ticketSetting = TicketSettingForAgents::first();
+            if($ticketSetting?->ticket_scope == 'group_tickets'){
+
+                $userGroupIds = TicketGroup::whereHas('enabledAgents', function ($query) use ($userid) {
+                    $query->where('agent_id', $userid);
+                })->pluck('id')->toArray();
+
+                $ticketSettingGroupIds = is_array($ticketSetting?->group_id) ? $ticketSetting?->group_id : explode(',', $ticketSetting?->group_id);
+                $commonGroupIds = array_intersect($userGroupIds, $ticketSettingGroupIds);
+
+                if($commonGroupIds && !in_array($ticket->group_id, $commonGroupIds)){
+
+                    abort_403(!$ticket->canEditTicket());
+                }else{
+                    $this->isEditable = true;
                 }
+            }elseif($ticketSetting?->ticket_scope == 'assigned_tickets'){
+                $this->isEditable = true;
+                abort_403(!$ticket->canEditTicket());
+            }elseif($ticketSetting?->ticket_scope == 'all_tickets'){
+                $this->isEditable = true;
             }
+        };
 
-            return redirect()->route('ticket.index')->with('success', __('Ticket successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
+        $ticket->update(['status' => $request->status]);
+
+        return Reply::successWithData(__('messages.updateSuccess'), ['status' => 'success']);
     }
 
-    public function show(Ticket $ticket)
+    public function agentGroup($id, $exceptThis = null)
     {
-        return redirect()->route('ticket.index');
-    }
+        $groups = TicketGroup::with('enabledAgents', 'enabledAgents.user');
+        $groups = $groups->where('id', $id)->first();
+        $ticketNumber = request()->ticketNumber;
+        $ticket = Ticket::where('ticket_number', $ticketNumber)->first();
+        $groupData = [];
+        $userData = [];
 
-    public function edit($ticket)
-    {
-        $ticket = Ticket::find($ticket);
-        if (\Auth::user()->can('Edit Ticket')) {
-            $employees = User::where('created_by', '=', \Auth::user()->creatorId())->where('type', '=', 'employee')->get()->pluck('name', 'id');
+        if (isset($groups) && count($groups->enabledAgents) > 0) {
+            $data = [];
+            foreach ($groups->enabledAgents as $agent) {
 
-            return view('ticket.edit', compact('ticket', 'employees'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
-    public function update(Request $request, $ticket)
-    {
-
-        $ticket = Ticket::find($ticket);
-        if (\Auth::user()->can('Edit Ticket')) {
-            $validator = \Validator::make(
-                $request->all(),
-                [
-                    'priority' => 'required',
-                    'end_date' => 'required',
-                ]
-            );
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
-
-                return redirect()->back()->with('error', $messages->first());
-            }
-
-
-            $ticket->title = $request->title;
-            if (Auth::user()->type == "employee") {
-                $ticket->employee_id = \Auth::user()->id;
-            } else {
-                $ticket->employee_id = $request->employee_id;
-            }
-            $ticket->priority    = $request->priority;
-            $ticket->end_date    = $request->end_date;
-            $ticket->description = $request->description;
-
-            if (!empty($request->attachment)) {
-
-                //storage limit
-                $dir = 'uploads/tickets/';
-                $file_path = $dir . $ticket->attachment;
-                $image_size = $request->file('attachment')->getSize();
-                $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-
-                if ($result == 1) {
-                    Utility::changeStorageLimit(\Auth::user()->creatorId(), $file_path);
-                    $filenameWithExt = $request->file('attachment')->getClientOriginalName();
-                    $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                    $extension       = $request->file('attachment')->getClientOriginalExtension();
-                    $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                    $dir = 'uploads/tickets/';
-                    $image_path = $dir . $fileNameToStore;
-
-                    $url = '';
-                    $path = Utility::upload_file($request, 'attachment', $fileNameToStore, $dir, []);
-                    $ticket->attachment = !empty($request->attachment) ? $fileNameToStore : '';
-                    if ($path['flag'] == 1) {
-                        $url = $path['url'];
-                    } else {
-                        return redirect()->back()->with('error', __($path['msg']));
-                    }
-                }
-            }
-
-            $ticket->status      = $request->status;
-            $ticket->save();
-
-            return redirect()->route('ticket.index', compact('ticket'))->with('success', __('Ticket successfully updated.'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
-    public function destroy(Ticket $ticket)
-    {
-        if (\Auth::user()->can('Delete Ticket')) {
-            if ($ticket->created_by == \Auth::user()->creatorId()) {
-                $ticket->delete();
-                $ticketId = TicketReply::select('id')->where('ticket_id', $ticket->id)->get()->pluck('id');
-                $reply = TicketReply::whereIn('id', $ticketId)->get();
-                TicketReply::whereIn('id', $ticketId)->delete();
-
-                if (!empty($ticket->attachment)) {
-
-                    //storage limit
-                    $file_path = 'uploads/tickets/' . $ticket->attachment;
-                    $result = Utility::changeStorageLimit(\Auth::user()->creatorId(), $file_path);
+                if($agent->user->id == (int)$exceptThis ?? 0) {
+                    continue;
                 }
 
-                foreach ($reply as $key => $value) {
-                    if (!empty($value->attachment)) {
+                $selected = !is_null($ticket) && $agent->user->id == $ticket->agent_id;
 
-                        //storage limit
-                        $file_path = 'uploads/tickets/' . $value->attachment;
-                        $result = Utility::changeStorageLimit(\Auth::user()->creatorId(), $file_path);
-                    }
-                }
+                $url = route('employees.show', [$agent->user->id]);
+                $userData[] = ['id' => $agent->user->id, 'value' => $agent->user->name, 'image' => $agent->user->image_url, 'link' => $url];
 
-                return redirect()->route('ticket.index')->with('success', __('Ticket successfully deleted.'));
-            } else {
-                return redirect()->back()->with('error', __('Permission denied.'));
+                $data[] = view('components.user-option', [
+                    'user' => $agent->user,
+                    'agent' => false,
+                    'pill' => false,
+                    'selected' => $selected,
+                ])->render();
             }
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+
+            $groupData = $userData;
         }
+        else {
+            $data = '<option value="">--</option>';
+        }
+
+        if($exceptThis !== "null" && $exceptThis !== null) {
+            $users = User::findOrFail($exceptThis);
+            $url = route('clients.show', [$users->id]);
+            $userData[] = ['id' => $users->id, 'value' => $users->name, 'image' => $users->image_url, 'link' => $url];
+            $groupData = $userData;
+        }
+
+        return Reply::dataOnly(['data' => $data, 'groupData' => $groupData]);
+
+
     }
 
-    public function reply($ticket)
-    {
-        $ticketreply = TicketReply::where('ticket_id', '=', $ticket)->orderBy('id', 'DESC')->get();
-        $ticket      = Ticket::find($ticket);
-        if (\Auth::user()->type == 'employee') {
-            $ticketreplyRead = TicketReply::where('ticket_id', $ticket->id)->where('created_by', '!=', \Auth::user()->id)->update(['is_read' => '1']);
-        } else {
-            $ticketreplyRead = TicketReply::where('ticket_id', $ticket->id)->where('created_by', '!=', \Auth::user()->creatorId())->update(['is_read' => '1']);
-        }
-
-        return view('ticket.reply', compact('ticket', 'ticketreply'));
-    }
-
-    public function changereply(Request $request)
-    {
-        $validator = \Validator::make(
-            $request->all(),
-            [
-                'description' => 'required',
-            ]
-        );
-        if ($validator->fails()) {
-            $messages = $validator->getMessageBag();
-
-            return redirect()->back()->with('error', $messages->first());
-        }
-
-        $ticket = Ticket::find($request->ticket_id);
-
-        $ticket_reply              = new TicketReply();
-        $ticket_reply->ticket_id   = $request->ticket_id;
-        $ticket_reply->employee_id = $ticket->employee_id;
-        $ticket_reply->description = $request->description;
-
-        if (!empty($request->attachment)) {
-            $image_size = $request->file('attachment')->getSize();
-
-            $result = Utility::updateStorageLimit(\Auth::user()->creatorId(), $image_size);
-            if ($result == 1) {
-                $filenameWithExt = $request->file('attachment')->getClientOriginalName();
-                $filename        = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                $extension       = $request->file('attachment')->getClientOriginalExtension();
-                $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-                $dir = 'uploads/tickets/';
-                $image_path = $dir . $fileNameToStore;
-
-                $url = '';
-                $path = Utility::upload_file($request, 'attachment', $fileNameToStore, $dir, []);
-                $ticket_reply->attachment    = !empty($request->attachment) ? $fileNameToStore : '';
-                if ($path['flag'] == 1) {
-                    $url = $path['url'];
-                } else {
-                    return redirect()->back()->with('error', __($path['msg']));
-                }
-            }
-        }
-
-        if (\Auth::user()->type == 'employee') {
-            $ticket_reply->created_by = Auth::user()->id;
-        } else {
-            $ticket_reply->created_by = Auth::user()->id;
-        }
-
-        $ticket_reply->save();
-
-        return redirect()->route('ticket.reply', $ticket_reply->ticket_id)->with('success', __('Ticket Reply successfully Send.'));
-    }
 }

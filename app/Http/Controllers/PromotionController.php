@@ -2,195 +2,130 @@
 
 namespace App\Http\Controllers;
 
+use App\Helper\Reply;
 use App\Models\Designation;
-use App\Models\Employee;
-use App\Mail\PromotionSend;
+use App\Models\EmployeeDetails;
 use App\Models\Promotion;
-use App\Models\Utility;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Mail;
+use App\Models\Team;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
+use App\Http\Requests\Admin\Employee\StorePromotionRequest;
 
-class PromotionController extends Controller
+class PromotionController extends AccountBaseController
 {
-    public function index()
-    {
-        if(\Auth::user()->can('Manage Promotion'))
-        {
-            if(Auth::user()->type == 'employee')
-            {
-                $emp        = Employee::where('user_id', '=', \Auth::user()->id)->first();
-                $promotions = Promotion::where('created_by', '=', \Auth::user()->creatorId())->where('employee_id', '=', $emp->id)->get();
-            }
-            else
-            {
-                $promotions = Promotion::where('created_by', '=', \Auth::user()->creatorId())->with(['employee', 'designation'])->get();
-            }
 
-            return view('promotion.index', compact('promotions'));
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
+    public function __construct()
+    {
+        parent::__construct();
+        $this->pageTitle = 'modules.incrementPromotion.incrementPromotions';
+
+        $this->middleware(function ($request, $next) {
+            abort_403(user()->permission('manage_increment_promotion') != 'all');
+            return $next($request);
+        });
     }
 
+    /**
+     * Show the form for creating a new resource.
+     */
     public function create()
     {
-        if(\Auth::user()->can('Create Promotion'))
-        {
-            $designations = Designation::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $employees    = Employee::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
+        $this->pageTitle = __('modules.incrementPromotion.addPromotion');
 
-            return view('promotion.create', compact('employees', 'designations'));
+        $this->userId = request()->user_id ? request()->user_id : null;
+        $this->promotion = Promotion::where('employee_id', $this->userId)->latest()->first();
+        $this->employeeDetail = EmployeeDetails::select('id', 'user_id', 'department_id', 'designation_id')->where('user_id', $this->userId)->first();
+
+        $this->currentDesignation = $this->employeeDetail->designation;
+        $this->currentDepartment = $this->employeeDetail->department;
+
+        // Override with promotion details if available
+        if ($this->promotion) {
+            $this->currentDesignation = $this->promotion->currentDesignation ?? $this->currentDesignation;
+            $this->currentDepartment = $this->promotion->currentDepartment ?? $this->currentDepartment;
         }
-        else
-        {
-            return response()->json(['error' => __('Permission denied.')], 401);
-        }
+
+        $this->designations = Designation::allDesignations();
+        $this->departments = Team::allDepartments();
+
+        return view('employees.ajax.add-promotion', $this->data)->render();
     }
 
-    public function store(Request $request)
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(StorePromotionRequest $request)
     {
-        if(\Auth::user()->can('Create Promotion'))
-        {
-            $validator = \Validator::make(
-                $request->all(), [
-                                   'employee_id' => 'required',
-                                   'designation_id' => 'required',
-                                   'promotion_title' => 'required',
-                                   'promotion_date' => 'required',
-                               ]
-            );
+        DB::beginTransaction();
 
-            if($validator->fails())
-            {
-                $messages = $validator->getMessageBag();
+        $data = [
+            'employee_id' => $request->user_id,
+            'date' => $request->date ? companyToYmd($request->date) : Carbon::now()->format('Y-m-d'),
+            'previous_designation_id' => $request->previous_designation_id,
+            'current_designation_id' => $request->current_designation_id,
+            'previous_department_id' => $request->previous_department_id,
+            'current_department_id' => $request->current_department_id,
+            'send_notification' => $request->send_notification == 'yes' ? $request->send_notification : 'no',
+            'promotion' => $request->promotion == 'on' ? 1 : 0,
+            'created_at' => Carbon::now()->format('Y-m-d H:i:s'),
+            'updated_at' => Carbon::now()->format('Y-m-d H:i:s')
+        ];
+        $statusMessage = $request->promotion == 'on' ? __('messages.promotionUpdatedSuccess') : __('messages.demotionUpdatedSuccess');
+        Promotion::create($data);
 
-                return redirect()->back()->with('error', $messages->first());
-            }
+        DB::commit();
 
-            $promotion                  = new Promotion();
-            $promotion->employee_id     = $request->employee_id;
-            $promotion->designation_id  = $request->designation_id;
-            $promotion->promotion_title = $request->promotion_title;
-            $promotion->promotion_date  = $request->promotion_date;
-            $promotion->description     = $request->description;
-            $promotion->created_by      = \Auth::user()->creatorId();
-            $promotion->save();
-
-            $setings = Utility::settings();
-           
-            if($setings['employee_promotion'] == 1)
-            {
-            $employee               = Employee::find($promotion->employee_id);
-            $designation            = Designation::find($promotion->designation_id);
-
-            $uArr = [
-                'employee_promotion_name'=>$employee->name,
-                'promotion_designation'  =>$designation->name,
-                'promotion_title'  =>$request->promotion_title,
-                'promotion_date'  =>$request->promotion_date,
-                
-
-             ];
-
-          $resp = Utility::sendEmailTemplate('employee_promotion', [$employee->email], $uArr);
-           return redirect()->route('promotion.index')->with('success', __('Promotion  successfully created.'). ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-            }
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
+        return Reply::success($statusMessage);
     }
 
-    public function show(Promotion $promotion)
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
     {
-        return redirect()->route('promotion.index');
+        $this->pageTitle = __('modules.incrementPromotion.editPromotion');
+
+        $this->promotion = Promotion::findOrFail($id);
+        $this->userId = $this->promotion->employee_id ?? null;
+
+        $this->designations = Designation::allDesignations();
+        $this->departments = Team::allDepartments();
+
+        return view('employees.ajax.edit-promotion', $this->data)->render();
     }
 
-    public function edit(Promotion $promotion)
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(StorePromotionRequest $request, string $id)
     {
-        $designations = Designation::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-        $employees    = Employee::where('created_by', Auth::user()->creatorId())->get()->pluck('name', 'id');
-        if(\Auth::user()->can('Edit Promotion'))
-        {
-            if($promotion->created_by == \Auth::user()->creatorId())
-            {
-                return view('promotion.edit', compact('promotion', 'employees', 'designations'));
-            }
-            else
-            {
-                return response()->json(['error' => __('Permission denied.')], 401);
-            }
-        }
-        else
-        {
-            return response()->json(['error' => __('Permission denied.')], 401);
-        }
+        DB::beginTransaction();
+
+        $promotion = Promotion::findOrFail($id);
+
+        $promotion->update([
+            'date' => $request->date ? companyToYmd($request->date) : Carbon::now()->format('Y-m-d'),
+            'current_designation_id' => $request->current_designation_id,
+            'current_department_id' => $request->current_department_id,
+            'send_notification' => $request->send_notification == 'yes' ? $request->send_notification : 'no',
+            'promotion' => $request->promotion == 'on' ? 1 : 0,
+        ]);
+
+        $statusMessage = $request->promotion == 'on' ? __('messages.promotionUpdatedSuccess') : __('messages.demotionUpdatedSuccess');
+        DB::commit();
+
+        return Reply::success($statusMessage);
     }
 
-    public function update(Request $request, Promotion $promotion)
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
     {
-        if(\Auth::user()->can('Edit Promotion'))
-        {
-            if($promotion->created_by == \Auth::user()->creatorId())
-            {
-                $validator = \Validator::make(
-                    $request->all(), [
-                                       'employee_id' => 'required',
-                                       'designation_id' => 'required',
-                                       'promotion_title' => 'required',
-                                       'promotion_date' => 'required',
-                                   ]
-                );
+        $promotion = Promotion::findOrFail($id);
+        $promotion->delete();
 
-                if($validator->fails())
-                {
-                    $messages = $validator->getMessageBag();
-
-                    return redirect()->back()->with('error', $messages->first());
-                }
-
-                $promotion->employee_id     = $request->employee_id;
-                $promotion->designation_id  = $request->designation_id;
-                $promotion->promotion_title = $request->promotion_title;
-                $promotion->promotion_date  = $request->promotion_date;
-                $promotion->description     = $request->description;
-                $promotion->save();
-
-                return redirect()->route('promotion.index')->with('success', __('Promotion successfully updated.'));
-            }
-            else
-            {
-                return redirect()->back()->with('error', __('Permission denied.'));
-            }
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
+        return Reply::success(__('messages.deleteSuccess'));
     }
 
-    public function destroy(Promotion $promotion)
-    {
-        if(\Auth::user()->can('Delete Promotion'))
-        {
-            if($promotion->created_by == \Auth::user()->creatorId())
-            {
-                $promotion->delete();
-
-                return redirect()->route('promotion.index')->with('success', __('Promotion successfully deleted.'));
-            }
-            else
-            {
-                return redirect()->back()->with('error', __('Permission denied.'));
-            }
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
 }

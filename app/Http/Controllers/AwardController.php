@@ -2,229 +2,236 @@
 
 namespace App\Http\Controllers;
 
+use App\DataTables\AwardDataTable;
+use App\Helper\Reply;
+use App\Http\Requests\Appreciation\AppreciationType\StoreRequest;
+use App\Http\Requests\Appreciation\AppreciationType\UpdateRequest;
 use App\Models\Award;
-use App\Models\AwardType;
-use App\Models\Employee;
-use App\Mail\AwardSend;
-use App\Models\Utility;
-use App\Models\Webhook;
+use App\Models\AwardIcon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Mail;
 
-use function App\Models\WebhookCall;
-
-class AwardController extends Controller
+class AwardController extends AccountBaseController
 {
-    public function index()
+
+    public function __construct()
     {
-        $usr = \Auth::user();
-        if ($usr->can('Manage Award')) {
-            $employees  = Employee::where('created_by', '=', \Auth::user()->creatorId())->get();
-            $awardtypes = AwardType::where('created_by', '=', \Auth::user()->creatorId())->get();
+        parent::__construct();
+        $this->pageTitle = 'app.menu.award';
+    }
 
-            if (Auth::user()->type == 'employee') {
-                $emp    = Employee::where('user_id', '=', \Auth::user()->id)->first();
-                $awards = Award::where('employee_id', '=', $emp->id)->get();
-            } else {
-                $awards = Award::where('created_by', '=', \Auth::user()->creatorId())->with(['employee', 'awardType'])->get();
-            }
+    public function index(AwardDataTable $dataTable)
+    {
+        $viewPermission = user()->permission('view_appreciation');
 
-            return view('award.index', compact('awards', 'employees', 'awardtypes'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
+        abort_403(!in_array($viewPermission, ['all', 'added', 'owned', 'both']));
+
+        return $dataTable->render('awards.index', $this->data);
+
     }
 
     public function create()
     {
-        if (\Auth::user()->can('Create Award')) {
-            $employees  = Employee::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-            $awardtypes = AwardType::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id');
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
 
-            return view('award.create', compact('employees', 'awardtypes'));
-        } else {
-            return response()->json(['error' => __('Permission denied.')], 401);
+        $this->icons = AwardIcon::all();
+
+        $this->pageTitle = __('modules.appreciations.addAppreciationType');
+
+
+        $this->view = 'awards.ajax.create';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('awards.create', $this->data);
+    }
+
+    public function quickCreate()
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+
+        $this->icons = AwardIcon::all();
+
+        $this->pageTitle = __('modules.appreciations.addAppreciationType');
+
+        return view('appreciations.ajax.create_appreciation_type', $this->data);
+    }
+
+    public function quickStore(StoreRequest $request)
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+
+        $award = new Award();
+        $award->title = $request->title;
+        $award->award_icon_id = $request->icon;
+        $award->color_code = $request->color_code;
+        $award->summary = $request->summery;
+        $award->save();
+
+        $awards = Award::with('awardIcon')->where('status', 'active')->get();
+
+        $options = $this->options($awards, $award);
+
+        return Reply::successWithData(__('messages.recordSaved'), ['data' => $options]);
+    }
+
+    public static function options($items, $group = null): string
+    {
+        $options = '<option value="">--</option>';
+
+        foreach ($items as $item) {
+
+            $name = $item->title;
+
+            $selected = (!is_null($group) && ($item->id == $group->id)) ? 'selected' : '';
+            $icon = "<i class='bi bi-" . $item->awardIcon->icon . "' style='color:" . $item->color_code . "'></i>     ";
+
+            $options .= '<option ' . $selected . '  data-content="' . $icon . ' ' . $name . '" value="' . $item->id . '">
+                                                ' . $name . '
+                                            </option>';
+        }
+
+        return $options;
+    }
+
+    public function store(StoreRequest $request)
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+
+        $appreciation = new Award();
+        $appreciation->title = $request->title;
+        $appreciation->award_icon_id = $request->icon;
+        $appreciation->color_code = $request->color_code;
+        $appreciation->summary = $request->summery;
+        $appreciation->save();
+
+        return Reply::successWithData(__('messages.recordSaved'), ['redirectUrl' => route('awards.index')]);
+
+    }
+
+    public function show($id)
+    {
+        $this->appreciationType = Award::findOrFail($id);
+
+        $this->manageAppreciationPermission = user()->permission('view_appreciation');
+        abort_403(!($this->manageAppreciationPermission != 'none'));
+
+        $this->pageTitle = $this->appreciationType->title;
+
+
+        $this->view = 'awards.ajax.show';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('awards.create', $this->data);
+
+    }
+
+    public function edit($id)
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+
+        $this->appreciationType = Award::findOrFail($id);
+
+        $this->icons = AwardIcon::all();
+        $this->pageTitle = __('modules.awards.appreciationType');
+
+        $this->view = 'awards.ajax.edit';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('awards.create', $this->data);
+
+    }
+
+    public function update(UpdateRequest $request, $id)
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+
+        $appreciation = Award::findOrFail($id);
+        $appreciation->title = $request->title;
+        $appreciation->award_icon_id = $request->icon;
+        $appreciation->summary = $request->summery;
+        $appreciation->color_code = $request->color_code;
+        $appreciation->status = $request->status;
+
+        $appreciation->save();
+
+        return Reply::successWithData(__('messages.updateSuccess'), ['redirectUrl' => route('awards.index')]);
+    }
+
+    public function destroy($id)
+    {
+        $this->manageAppreciationPermission = user()->permission('manage_award');
+        abort_403(!($this->manageAppreciationPermission == 'all'));
+        Award::destroy($id);
+
+        return Reply::successWithData(__('messages.deleteSuccess'), ['redirectUrl' => route('awards.index')]);
+
+    }
+
+    public function changeStatus(Request $request)
+    {
+        abort_403(user()->permission('manage_award') != 'all');
+
+        $appreciationId = $request->appreciationId;
+        $status = $request->status;
+        $award = Award::findOrFail($appreciationId);
+        $award->status = $status;
+        $award->save();
+
+        return Reply::success(__('messages.updateSuccess'));
+    }
+
+    public function applyQuickAction(Request $request)
+    {
+        switch ($request->action_type) {
+        case 'delete':
+            $this->deleteRecords($request);
+
+            return Reply::success(__('messages.deleteSuccess'));
+        case 'change-leave-status':
+            $this->changeBulkStatus($request);
+
+            return Reply::success(__('messages.updateSuccess'));
+        default:
+            return Reply::error(__('messages.selectAction'));
         }
     }
 
-    public function store(Request $request)
+    protected function deleteRecords($request)
     {
+        abort_403(user()->permission('manage_award') != 'all');
+        $item = explode(',', $request->row_ids);
 
-        if (\Auth::user()->can('Create Award')) {
-
-            $validator = \Validator::make(
-                $request->all(),
-                [
-                    'employee_id' => 'required',
-                    'award_type' => 'required',
-                    'date' => 'required',
-                    'gift' => 'required',
-                ]
-            );
-
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
-
-                return redirect()->back()->with('error', $messages->first());
-            }
-
-            $award              = new Award();
-            $award->employee_id = $request->employee_id;
-            $award->award_type  = $request->award_type;
-            $award->date        = $request->date;
-            $award->gift        = $request->gift;
-            $award->description =  $request->description;
-            $award->created_by  = \Auth::user()->creatorId();
-            $award->save();
-
-            //slack
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $awardtype = AwardType::find($request->award_type);
-            $emp = Employee::find($request->employee_id);
-            if (isset($setting['award_notification']) && $setting['award_notification'] == 1) {
-                // $msg = $awardtype->name . ' ' . __("created for") . ' ' . $emp->name . ' ' . __("from") . ' ' . $request->date . '.';
-
-                $uArr = [
-                    'award_name' => $awardtype->name,
-                    'employee_name' => $emp->name,
-                    'date' => $request->date,
-                ];
-                Utility::send_slack_msg('new_award', $uArr);
-            }
-
-            //telegram
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $awardtype = AwardType::find($request->award_type);
-            $emp = Employee::find($request->employee_id);
-            if (isset($setting['telegram_award_notification']) && $setting['telegram_award_notification'] == 1) {
-                // $msg = $awardtype->name . ' ' . __("created for") . ' ' . $emp->name . ' ' . __("from") . ' ' . $request->date . '.';
-
-                $uArr = [
-                    'award_name' => $awardtype->name,
-                    'employee_name' => $emp->name,
-                    'date' => $request->date,
-                ];
-
-                Utility::send_telegram_msg('new_award', $uArr);
-            }
-
-            // twilio  
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            $awardtype = AwardType::find($request->award_type);
-            $emp = Employee::find($request->employee_id);
-            if (isset($setting['twilio_award_notification']) && $setting['twilio_award_notification'] == 1) {
-                // $msg = $awardtype->name . ' ' . __("created for") . ' ' . $emp->name . ' ' . __("from") . ' ' . $request->date . '.';
-
-                $uArr = [
-                    'award_name' => $awardtype->name,
-                    'employee_name' => $emp->name,
-                    'date' => $request->date,
-                ];
-
-                Utility::send_twilio_msg($emp->phone, 'new_award', $uArr);
-            }
-
-            $setings = Utility::settings();
-            if ($setings['new_award'] == 1) {
-                $employee     = Employee::find($award->employee_id);
-                $uArr = [
-                    'award_name' => $employee->name,
-
-                ];
-
-                $resp = Utility::sendEmailTemplate('new_award', [$employee->email], $uArr);
-                // return redirect()->route('award.index')->with('success', __('Award successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-            }
-
-            //webhook
-            $module = 'New Award';
-            $webhook =  Utility::webhookSetting($module);
-            if ($webhook) {
-                $parameter = json_encode($award);
-                // 1 parameter is  URL , 2 parameter is data , 3 parameter is method
-                $status = Utility::WebhookCall($webhook['url'], $parameter, $webhook['method']);
-                if ($status == true) {
-                    return redirect()->route('award.index')->with('success', __('Award successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-                } else {
-                    return redirect()->back()->with('error', __('Webhook call failed.'));
-                }
-            }
-
-            return redirect()->route('award.index')->with('success', __('Award successfully created.') . ((!empty($resp) && $resp['is_success'] == false && !empty($resp['error'])) ? '<br> <span class="text-danger">' . $resp['error'] . '</span>' : ''));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        if (($key = array_search('on', $item)) !== false) {
+            unset($item[$key]);
         }
+
+        Award::whereIn('id', $item)->delete();
     }
 
-    public function show(Award $award)
+    protected function changeBulkStatus($request)
     {
-        return redirect()->route('award.index');
-    }
+        abort_403(user()->permission('manage_award') != 'all');
+        $item = explode(',', $request->row_ids);
 
-    public function edit(Award $award)
-    {
-        if (\Auth::user()->can('Edit Award')) {
-            if ($award->created_by == \Auth::user()->creatorId()) {
-                $employees  = Employee::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-                $awardtypes = AwardType::where('created_by', '=', \Auth::user()->creatorId())->get()->pluck('name', 'id');
-
-                return view('award.edit', compact('award', 'awardtypes', 'employees'));
-            } else {
-                return response()->json(['error' => __('Permission denied.')], 401);
-            }
-        } else {
-            return response()->json(['error' => __('Permission denied.')], 401);
+        if (($key = array_search('on', $item)) !== false) {
+            unset($item[$key]);
         }
+
+        Award::whereIn('id', $item)->update(['status' => $request->status]);
     }
 
-    public function update(Request $request, Award $award)
-    {
-        if (\Auth::user()->can('Edit Award')) {
-            if ($award->created_by == \Auth::user()->creatorId()) {
-                $validator = \Validator::make(
-                    $request->all(),
-                    [
-                        'employee_id' => 'required',
-                        'award_type' => 'required',
-                        'date' => 'required',
-                        'gift' => 'required',
-                    ]
-                );
-
-                if ($validator->fails()) {
-                    $messages = $validator->getMessageBag();
-
-                    return redirect()->back()->with('error', $messages->first());
-                }
-                $award->employee_id = $request->employee_id;
-                $award->award_type  = $request->award_type;
-                $award->date        = $request->date;
-                $award->gift        = $request->gift;
-                $award->description = $request->description;
-                $award->save();
-
-                return redirect()->route('award.index')->with('success', __('Award successfully updated.'));
-            } else {
-                return redirect()->back()->with('error', __('Permission denied.'));
-            }
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
-
-    public function destroy(Award $award)
-    {
-        if (\Auth::user()->can('Delete Award')) {
-            if ($award->created_by == \Auth::user()->creatorId()) {
-                $award->delete();
-
-                return redirect()->route('award.index')->with('success', __('Award successfully deleted.'));
-            } else {
-                return redirect()->back()->with('error', __('Permission denied.'));
-            }
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
-        }
-    }
 }

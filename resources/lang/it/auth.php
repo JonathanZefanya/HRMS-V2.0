@@ -1,19 +1,17 @@
-<?php
-
+<?php 
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | Authentication Language Lines
-    |--------------------------------------------------------------------------
-    |
-    | The following language lines are used during authentication for various
-    | messages that we need to display to the user. You are free to modify
-    | these language lines according to your application's requirements.
-    |
-    */
-
-    'failed' => 'These credentials do not match our records.',
-    'throttle' => 'Too many login attempts. Please try again in :seconds seconds.',
-
+  'failed' => 'Queste credenziali non corrispondono ai nostri record.',
+  'failedLoginDisabled' => 'L\'accesso è stato disabilitato dal tuo amministratore',
+  'failedBlocked' => 'Il tuo account è disabilitato!. Contatta il tuo amministratore per abilitarlo.',
+  'throttle' => 'Troppi tentativi di accesso. Riprova tra :seconds secondi.',
+  'recaptchaFailed' => 'Recaptcha non convalidato.',
+  'sociaLoginFail' => 'Il tuo account non esiste. Per favore iscriviti',
+  'loginWrongCompany' => 'Stai cercando di accedere alla società sbagliata.',
+  'signInGoogle' => 'Accedi con Google',
+  'signInFacebook' => 'Accedi con Facebook',
+  'signInLinkedin' => 'Accedi con LinkedIn',
+  'signInTwitter' => 'Iscriviti con Twitter',
+  'useEmail' => 'oppure utilizza l\'indirizzo email',
+  'email' => 'Indirizzo e-mail',
+  'next' => 'Prossimo',
 ];

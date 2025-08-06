@@ -2,31 +2,74 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use App\Models\Utility;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\Company;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Request;
 
 class DatabaseSeeder extends Seeder
 {
     /**
-     * Seed the application's database.
+     * Run the database seeds.
+     *
+     * @return void
      */
-    public function run(): void
-    {
-        // User::factory(10)->create();
 
-        Artisan::call('module:migrate LandingPage');
-        Artisan::call('module:seed LandingPage');
-        if (Request::route() || Request::route()->getName() != 'LaravelUpdater::database') {
-            $this->call(UsersTableSeeder::class);
-            $this->call(PlansTableSeeder::class);
-            $this->call(NotificationSeeder::class);
-            $this->call(AiTemplateSeeder::class);
-        } else {
-            Utility::languagecreate();
+    public function run()
+    {
+        // Set Seeding to true check if data is seeding.
+        // This is required to stop notification in installation
+        config(['app.seeding' => true]);
+
+        Artisan::call('key:generate');
+
+        $this->call(CountriesTableSeeder::class);
+        $this->call(SmtpSettingsSeeder::class);
+        $this->call(CoreDatabaseSeeder::class);
+        $this->call(ModulePermissionSeeder::class);
+
+        $this->call(OrganisationSettingsTableSeeder::class);
+
+        $companies = Company::select('id')->get();
+
+        foreach ($companies as $company) {
+
+            if (!App::environment('codecanyon')) {
+                $this->call(DepartmentTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(UsersTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(BankAccountSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ProjectCategorySeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ProjectSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(EstimateSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ExpenseSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(TicketSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(TicketSettingSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(RoleSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(LeaveSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(NoticesTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(EventTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(LeadSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(TaxTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ProductTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ContractTypeTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ContractTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(LeadsTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(MessageSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(ShiftSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(AttendanceTableSeeder::class, false, ['companyId' => $company->id]);
+                $this->call(AppreciationSeeder::class, false, ['companyId' => $company->id]);
+            }
+
+            $this->call(EmployeePermissionSeeder::class, false, ['companyId' => $company->id]);
         }
+
+        if (!App::environment('codecanyon')) {
+            Artisan::call('sync-user-permissions all');
+        }
+
+        config(['app.seeding' => false]);
+
+        cache()->flush();
     }
+
 }

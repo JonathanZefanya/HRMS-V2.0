@@ -1,1 +1,10 @@
-<?php return ['password'=>'Passwords must be at least eight characters and match the confirmation.','reset'=>'Your password has been reset!','sent'=>'We have e-mailed your password reset link!','token'=>'This password reset token is invalid.','user'=>'We can\'t find a user with that e-mail address.','throttled'=>'You have requested password reset recently, please check your email.',];
+<?php 
+return [
+  'password' => 'As senhas devem ter pelo menos seis caracteres e corresponder à confirmação.',
+  'reset' => 'Sua senha foi alterada!. Aguarde, você será redirecionado de volta à página de login em breve',
+  'sent' => 'Por favor, verifique sua conta de e-mail. Enviamos por e-mail o link de redefinição de senha!',
+  'token' => 'Este token de redefinição de senha é inválido.',
+  'user' => 'Não conseguimos encontrar um usuário com esse endereço de e-mail.',
+  'throttled' => 'Aguarde antes de tentar novamente.',
+  'notMatch' => 'A senha fornecida não corresponde à sua senha atual.',
+];

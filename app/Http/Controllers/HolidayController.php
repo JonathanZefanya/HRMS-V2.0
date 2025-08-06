@@ -2,440 +2,544 @@
 
 namespace App\Http\Controllers;
 
-use App\Exports\HolidayExport;
-use App\Imports\HolidayImport;
-use App\Models\Holiday as LocalHoliday;
+use Carbon\Carbon;
+use App\Models\Team;
+use App\Models\User;
+use App\Helper\Reply;
+use App\Models\Holiday;
+use App\Services\Google;
+use App\Models\Designation;
 use Illuminate\Http\Request;
-use App\Models\Utility;
-use Illuminate\Support\Facades\Auth;
-use Maatwebsite\Excel\Facades\Excel;
-use Spatie\GoogleCalendar\Event as GoogleEvent;
+use Illuminate\Support\Facades\DB;
+use App\DataTables\HolidayDataTable;
+use App\Http\Requests\CommonRequest;
+use App\Models\GoogleCalendarModule;
+use Illuminate\Support\Facades\View;
+use App\Http\Requests\Holiday\CreateRequest;
+use App\Http\Requests\Holiday\UpdateRequest;
+use App\Helper\Common;
 
-class HolidayController extends Controller
+class HolidayController extends AccountBaseController
 {
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->pageTitle = 'app.menu.holiday';
+    }
 
     public function index(Request $request)
     {
-        if (\Auth::user()->can('Manage Holiday')) {
-            $holidays = LocalHoliday::where('created_by', '=', \Auth::user()->creatorId());
+        $this->viewPermission = user()->permission('view_holiday');
+        abort_403(!in_array($this->viewPermission, ['all', 'added', 'owned', 'both']));
 
-            if (!empty($request->start_date)) {
-                $holidays->where('start_date', '>=', $request->start_date);
+
+        if (request('start') && request('end')) {
+            $holidayArray = array();
+
+            $holidays = Holiday::orderBy('date', 'ASC');
+
+            if (request()->searchText != '') {
+                $safeTerm = Common::safeString(request('searchText'));
+                $holidays->where('holidays.occassion', 'like', '%' . $safeTerm . '%');
             }
-            if (!empty($request->end_date)) {
-                $holidays->where('end_date', '<=', $request->end_date);
+
+            if (in_array($this->viewPermission, ['owned', 'both'])) {
+                $user = user();
+                $holidays->where(function ($query) use ($user) {
+                    // Common conditions
+                    $query->where(function ($q) use ($user) {
+                        $q->orWhere('department_id_json', 'like', '%"' . $user->employeeDetails->department_id . '"%')
+                            ->orWhereNull('department_id_json');
+                    });
+                    $query->where(function ($q) use ($user) {
+                        $q->orWhere('designation_id_json', 'like', '%"' . $user->employeeDetails->designation_id . '"%')
+                            ->orWhereNull('designation_id_json');
+                    });
+                    $query->where(function ($q) use ($user) {
+                        $q->orWhere('employment_type_json', 'like', '%"' . $user->employeeDetails->employment_type . '"%')
+                            ->orWhereNull('employment_type_json');
+                    });
+
+                    // Additional condition for 'both'
+                    if ($this->viewPermission == 'both') {
+                        $query->orWhere('added_by', $user->id);
+                    }
+                });
             }
+
             $holidays = $holidays->get();
 
-            return view('holiday.index', compact('holidays'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+            foreach ($holidays as $key => $holiday) {
+
+                $holidayArray[] = [
+                    'id' => $holiday->id,
+                    'title' => $holiday->occassion,
+                    'start' => $holiday->date->format('Y-m-d'),
+                    'end' => $holiday->date->format('Y-m-d'),
+                ];
+            }
+
+            return $holidayArray;
         }
+
+        return view('holiday.calendar.index', $this->data);
     }
 
-
+    /**
+     * @return \Illuminate\Contracts\Foundation\Application|\Illuminate\Contracts\View\Factory|\Illuminate\Contracts\View\View|mixed|void
+     */
     public function create()
     {
-        if (\Auth::user()->can('Create Holiday')) {
-            return view('holiday.create');
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        $this->addPermission = user()->permission('add_holiday');
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
+
+        $this->redirectUrl = request()->date ? route('holidays.index') : route('holidays.table_view');
+        $this->date = request()->date ? Carbon::parse(request()->date)->timezone(company()->timezone)->translatedFormat(company()->date_format) : '';
+
+        $this->pageTitle = __('app.menu.holiday');
+
+        $this->view = 'holiday.ajax.create';
+
+        $this->teams = Team::all();
+        $this->designations = Designation::allDesignations();
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
         }
+
+        return view('holiday.create', $this->data);
     }
 
-
-    public function store(Request $request)
+    /**
+     *
+     * @param CreateRequest $request
+     * @return void
+     */
+    public function store(CreateRequest $request)
     {
-        if (\Auth::user()->can('Create Holiday')) {
-            $validator = \Validator::make(
-                $request->all(),
-                [
-                    'occasion' => 'required',
-                    'start_date' => 'required',
-                    'end_date' => 'required',
-                ]
-            );
 
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
+        $this->addPermission = user()->permission('add_holiday');
 
-                return redirect()->back()->with('error', $messages->first());
-            }
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
 
-            $holiday             = new LocalHoliday();
-            $holiday->occasion          = $request->occasion;
-            $holiday->start_date        = $request->start_date;
-            $holiday->end_date          = $request->end_date;
-            $holiday->created_by = \Auth::user()->creatorId();
-            $holiday->save();
+        $occassions = $request->occassion;
+        $dates = $request->date;
+        $notificationSent = $request->notification_sent;
 
-            // slack
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            if (isset($setting['Holiday_notification']) && $setting['Holiday_notification'] == 1) {
-                // $msg = $request->occasion . ' ' . __("on") . ' ' . $request->start_date . ' ' . __("to") . ' ' . $request->end_date;
 
-                $uArr = [
-                    'occasion_name' => $request->occasion,
-                    'start_date' => $request->start_date,
-                    'end_date' => $request->end_date,
-                ];
+        foreach ($dates as $index => $value) {
+            if ($value != '') {
 
-                Utility::send_slack_msg('new_holidays', $uArr);
-            }
+                $holiday = new Holiday();
+                $holiday->date = Carbon::createFromFormat($this->company->date_format, $value);
+                $holiday->occassion = $occassions[$index];
+                $holiday->notification_sent = $notificationSent;
 
-            // telegram
-            $setting = Utility::settings(\Auth::user()->creatorId());
-            if (isset($setting['telegram_Holiday_notification']) && $setting['telegram_Holiday_notification'] == 1) {
-                // $msg = $request->occasion . ' ' . __("on") . ' ' . $request->date . '.';
+                if (!empty($request->department)) {
+                    $holiday->department_id_json = json_encode($request->department);
+                }
 
-                $uArr = [
-                    'occasion_name' => $request->occasion,
-                    'start_date' => $request->start_date,
-                    'end_date' => $request->end_date,
-                ];
+                if (!empty($request->designation)) {
+                    $holiday->designation_id_json = json_encode($request->designation);
+                }
 
-                Utility::send_telegram_msg('new_holidays', $uArr);
-            }
+                if (!empty($request->employment_type)) {
+                    $holiday->employment_type_json = json_encode($request->employment_type);
+                }
 
-            // google calendar
-            if ($request->get('synchronize_type')  == 'google_calender') {
+                $holiday->save();
 
-                $type = 'holiday';
-                $request1 = new GoogleEvent();
-                $request1->title = $request->occasion;
-                $request1->start_date = $request->start_date;
-                $request1->end_date = $request->end_date;
-                Utility::addCalendarData($request1, $type);
-            }
-
-            //webhook
-            $module = 'New Holidays';
-            $webhook =  Utility::webhookSetting($module);
-            if ($webhook) {
-                $parameter = json_encode($holiday);
-                // 1 parameter is  URL , 2 parameter is data , 3 parameter is method
-                $status = Utility::WebhookCall($webhook['url'], $parameter, $webhook['method']);
-                if ($status == true) {
-                    return redirect()->back()->with('success', __('Holiday successfully created.'));
-                } else {
-                    return redirect()->back()->with('error', __('Webhook call failed.'));
+                if ($holiday) {
+                    $holiday->event_id = $this->googleCalendarEvent($holiday);
+                    $holiday->save();
                 }
             }
-
-            return redirect()->route('holiday.index')->with('success', 'Holiday successfully created.');
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
         }
-    }
 
-
-    public function show($id)
-    {
-        $holidays = LocalHoliday::where('id', $id)->first();
-        return view('holiday.show', compact('holidays'));
-    }
-
-
-    public function edit(LocalHoliday $holiday)
-    {
-        if (\Auth::user()->can('Edit Holiday')) {
-            return view('holiday.edit', compact('holiday'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        if (request()->has('type')) {
+            return redirect(route('holidays.index'));
         }
+
+        $redirectUrl = urldecode($request->redirect_url);
+
+        if ($redirectUrl == '') {
+            $redirectUrl = route('holidays.index');
+        }
+
+        return Reply::successWithData(__('messages.recordSaved'), ['redirectUrl' => $redirectUrl]);
     }
 
-
-    public function update(Request $request, LocalHoliday $holiday)
+    /**
+     * Display the specified holiday.
+     */
+    public function show(Holiday $holiday)
     {
-        if (\Auth::user()->can('Edit Holiday')) {
-            $validator = \Validator::make(
-                $request->all(),
-                [
-                    'occasion' => 'required',
-                    'start_date' => 'required',
-                    'end_date' => 'required',
-                ]
-            );
+        $this->holiday = $holiday;
 
-            if ($validator->fails()) {
-                $messages = $validator->getMessageBag();
+        $departmentArray = $this->holiday?->department(json_decode($holiday->department_id_json));
+        $this->department = $departmentArray ? implode(', ', $departmentArray) : '--';
 
-                return redirect()->back()->with('error', $messages->first());
-            }
 
-            $holiday->occasion          = $request->occasion;
-            $holiday->start_date        = $request->start_date;
-            $holiday->end_date          = $request->end_date;
+        $designationArray = $this->holiday?->designation(json_decode($holiday->designation_id_json));
+        $this->designation = $designationArray ? implode(', ', $designationArray) : '--';
+
+
+        $this->employment_type = !empty($holiday->employment_type_json) ? collect(json_decode($holiday->employment_type_json))
+            ->map(function ($employmentType) {
+                return __('modules.employees.' . $employmentType);
+            })
+            ->implode(', ') : '--';
+
+
+        $this->viewPermission = user()->permission('view_holiday');
+        abort_403(!($this->viewPermission == 'all' || $this->viewPermission == 'owned' || $this->viewPermission == 'both' || ($this->viewPermission == 'added' && $this->holiday->added_by == user()->id)));
+
+        $this->pageTitle = __('app.menu.holiday');
+
+        $this->view = 'holiday.ajax.show';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('holiday.create', $this->data);
+    }
+
+    /**
+     * @param Holiday $holiday
+     * @return \Illuminate\Contracts\Foundation\Application|\Illuminate\Contracts\View\Factory|\Illuminate\Contracts\View\View|mixed|void
+     */
+    public function edit(Holiday $holiday)
+    {
+        $this->holiday = $holiday;
+        $this->teams = Team::all();
+        $this->designations = Designation::allDesignations();
+
+
+        $this->departmentId = $this->holiday->department_id_json;
+        $this->departmentArray = $this->departmentId ? json_decode($this->departmentId, true) : [];
+        if (!is_array($this->departmentArray)) {
+            $this->departmentArray = [];
+        }
+
+        $this->designationId = $this->holiday->designation_id_json;
+        $this->designationArray = $this->designationId ? json_decode($this->designationId, true) : [];
+        if (!is_array($this->designationArray)) {
+            $this->designationArray = [];
+        }
+
+        $this->employmentType = $this->holiday->employment_type_json;
+        $this->employmentTypeArray = $this->employmentType ? json_decode($this->employmentType, true) : [];
+        if (!is_array($this->employmentTypeArray)) {
+            $this->employmentTypeArray = [];
+        }
+
+
+        $this->editPermission = user()->permission('edit_holiday');
+
+        abort_403(!($this->editPermission == 'all' || ($this->editPermission == 'added' && $this->holiday->added_by == user()->id)));
+
+        $this->pageTitle = __('app.menu.holiday');
+
+        $this->view = 'holiday.ajax.edit';
+
+        if (request()->ajax()) {
+            return $this->returnAjax($this->view);
+        }
+
+        return view('holiday.create', $this->data);
+    }
+
+    /**
+     * @param UpdateRequest $request
+     * @param Holiday $holiday
+     * @return array|void
+     */
+    public function update(UpdateRequest $request,  $id)
+    {
+        $this->editPermission = user()->permission('edit_holiday');
+        abort_403(!($this->editPermission == 'all' || ($this->editPermission == 'added' && $this->holiday->added_by == user()->id)));
+
+        $data = $request->all();
+        $data['date'] = companyToYmd($request->date);
+
+        $holiday = Holiday::find($id);
+
+        $holiday->department_id_json = $request->has('department') ? json_encode($request->department) : null;
+        $holiday->designation_id_json = $request->has('designation') ? json_encode($request->designation) : null;
+        $holiday->employment_type_json = $request->has('employment_type') ? json_encode($request->employment_type) : null;
+
+        $holiday->occassion = $request->occassion;
+        $holiday->date = Carbon::createFromFormat($this->company->date_format, $request->date);
+
+        $holiday->save();
+
+        if ($holiday) {
+            $holiday->event_id = $this->googleCalendarEvent($holiday);
             $holiday->save();
-
-            return redirect()->route('holiday.index')->with(
-                'success',
-                'Holiday successfully updated.'
-            );
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
         }
+
+        return Reply::successWithData(__('messages.updateSuccess'), ['redirectUrl' => route('holidays.index')]);
     }
 
-
-    public function destroy(LocalHoliday $holiday)
+    /**
+     * @param Holiday $holiday
+     * @return array|void
+     */
+    public function destroy(Holiday $holiday)
     {
-        if (\Auth::user()->can('Delete Holiday')) {
-            $holiday->delete();
+        $deletePermission = user()->permission('delete_holiday');
+        abort_403(!($deletePermission == 'all' || ($deletePermission == 'added' && $holiday->added_by == user()->id)));
 
-            return redirect()->route('holiday.index')->with(
-                'success',
-                'Holiday successfully deleted.'
-            );
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+        $holiday->delete();
+
+        return Reply::successWithData(__('messages.deleteSuccess'), ['redirectUrl' => route('holidays.index')]);
+    }
+
+    public function tableView(HolidayDataTable $dataTable)
+    {
+        $viewPermission = user()->permission('view_holiday');
+        abort_403(!in_array($viewPermission, ['all', 'added', 'owned', 'both']));
+
+        $this->pageTitle = __('app.menu.listView');
+        $this->currentYear = now()->format('Y');
+        $this->currentMonth = now()->month;
+
+        /* year range from last 5 year to next year */
+        $years = [];
+
+        $latestFifthYear = (int)now()->subYears(5)->format('Y');
+        $nextYear = (int)now()->addYear()->format('Y');
+
+        for ($i = $latestFifthYear; $i <= $nextYear; $i++) {
+            $years[] = $i;
         }
+
+        $this->years = $years;
+
+        return $dataTable->render('holiday.index', $this->data);
     }
 
-    // public function calender(Request $request)
-    // {
-    //     if (\Auth::user()->can('Manage Holiday')) {
-    //         $holidays = LocalHoliday::where('created_by', '=', \Auth::user()->creatorId());
-    //         $today_date = date('m');
-    //         // $current_month_event = Holiday::select( 'occasion','start_date','end_date', 'created_at')->whereRaw('MONTH(start_date)=' . $today_date,'MONTH(end_date)=' . $today_date)->get();
-    //         $current_month_event = LocalHoliday::where('created_by', \Auth::user()->creatorId())->select('occasion', 'start_date', 'end_date', 'created_at')->whereNotNull(['start_date', 'end_date'])->whereMonth('start_date', $today_date)->whereMonth('end_date', $today_date)->get();
-    //         if (!empty($request->start_date)) {
-    //             $holidays->where('start_date', '>=', $request->start_date);
-    //         }
-    //         if (!empty($request->end_date)) {
-    //             $holidays->where('end_date', '<=', $request->end_date);
-    //         }
-    //         $holidays = $holidays->get();
-
-    //         $arrHolidays = [];
-
-    //         foreach ($holidays as $holiday) {
-
-    //             $arr['id']        = $holiday['id'];
-    //             $arr['title']     = $holiday['occasion'];
-    //             $arr['start']     = $holiday['start_date'];
-    //             $arr['end']       = $holiday['end_date'];
-    //             $arr['className'] = 'event-primary';
-    //             $arr['url']       = route('holiday.edit', $holiday['id']);
-    //             $arrHolidays[]    = $arr;
-    //         }
-    //         // $arrHolidays = str_replace('"[', '[', str_replace(']"', ']', json_encode($arrHolidays)));
-    //         $arrHolidays =  json_encode($arrHolidays);
-
-
-    //         return view('holiday.calender', compact('arrHolidays', 'current_month_event','holidays'));
-    //     } else {
-    //         return redirect()->back()->with('error', __('Permission denied.'));
-    //     }
-    // }
-
-    public function calender(Request $request)
+    public function applyQuickAction(Request $request)
     {
-        if (\Auth::user()->can('Manage Holiday')) {
-            $transdate = date('Y-m-d', time());
+        abort_403(!in_array(user()->permission('edit_leave'), ['all', 'added']));
 
-            $holidays = LocalHoliday::where('created_by', '=', \Auth::user()->creatorId());
+        if ($request->action_type === 'delete') {
+            $this->deleteRecords($request);
 
-            if (!empty($request->start_date)) {
-                $holidays->where('start_date', '>=', $request->start_date);
-            }
-            if (!empty($request->end_date)) {
-                $holidays->where('end_date', '<=', $request->end_date);
-            }
-            $holidays = $holidays->get();
-
-            $arrHolidays = [];
-
-            foreach ($holidays as $holiday) {
-                $arr['id']        = $holiday['id'];
-                $arr['title']     = $holiday['occasion'];
-                $arr['start']     = $holiday['date'];
-                $arr['end']       = $holiday['end_date'];
-                $arr['className'] = 'event-primary';
-                $arr['url']       = route('holiday.edit', $holiday['id']);
-                $arrHolidays[]    = $arr;
-            }
-            $arrHolidays = str_replace('"[', '[', str_replace(']"', ']', json_encode($arrHolidays)));
-
-            return view('holiday.calender', compact('arrHolidays', 'transdate', 'holidays'));
-        } else {
-            return redirect()->back()->with('error', __('Permission denied.'));
+            return Reply::success(__('messages.deleteSuccess'));
         }
+
+        return Reply::error(__('messages.selectAction'));
     }
 
-    public function export(Request $request)
+    protected function deleteRecords($request)
     {
-        $name = 'holidays_' . date('Y-m-d i:h:s');
-        $data = Excel::download(new HolidayExport(), $name . '.xlsx');
+        abort_403(user()->permission('delete_holiday') != 'all');
 
-
-        return $data;
+        Holiday::whereIn('id', explode(',', $request->row_ids))->delete();
     }
-    public function importFile(Request $request)
+
+    public function markHoliday()
     {
-        return view('holiday.import');
+        $this->addPermission = user()->permission('add_holiday');
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
+
+        return view('holiday.mark-holiday.index', $this->data);
     }
-    // public function import(Request $request)
-    // {
-    //     $rules = [
-    //         'file' => 'required|mimes:csv,txt',
-    //     ];
-    //     $validator = \Validator::make($request->all(), $rules);
 
-    //     if ($validator->fails()) {
-    //         $messages = $validator->getMessageBag();
-
-    //         return redirect()->back()->with('error', $messages->first());
-    //     }
-
-    //     try {
-    //         $holidays = (new HolidayImport())->toArray(request()->file('file'))[0];
-
-    //         $totalholiday = count($holidays);
-
-    //         $errorArray    = [];
-    //         foreach ($holidays as $holiday) {
-
-    //             $holiydayData = LocalHoliday::whereDate('start_date', $holiday['start_date'])->whereDate('end_date', $holiday['end_date'])->where('occasion', $holiday['occasion'])->first();
-
-    //             if (!empty($holiydayData)) {
-    //                 $errorArray[] = $holiydayData;
-    //             } else {
-    //                 $holidays_data = new LocalHoliday();
-    //                 $holidays_data->start_date = $holiday['start_date'];
-    //                 $holidays_data->end_date = $holiday['end_date'];
-    //                 $holidays_data->occasion = $holiday['occasion'];
-    //                 $holidays_data->created_by = Auth::user()->id;
-    //                 $holidays_data->save();
-    //             }
-    //         }
-    //     } catch (\Throwable $th) {
-    //         return redirect()->back()->with('error', __('Something went wrong please try again.'));
-    //     }
-
-    //     if (empty($errorArray)) {
-    //         $data['status'] = 'success';
-    //         $data['msg']    = __('Record successfully imported');
-    //     } else {
-
-    //         $data['status'] = 'error';
-    //         $data['msg']    = count($errorArray) . ' ' . __('Record imported fail out of' . ' ' . $totalholiday . ' ' . 'record');
-
-
-    //         foreach ($errorArray as $errorData) {
-    //             $errorRecord[] = implode(',', $errorData->toArray());
-    //         }
-
-    //         \Session::put('errorArray', $errorRecord);
-    //     }
-
-    //     return redirect()->back()->with($data['status'], $data['msg']);
-    // }
-
-    public function holidaysImportdata(Request $request)
+    public function markDayHoliday(CommonRequest $request)
     {
-        session_start();
-        $html = '<h3 class="text-danger text-center">Below data is not inserted</h3></br>';
-        $flag = 0;
-        $html .= '<table class="table table-bordered"><tr>';
-        try {
-            $request = $request->data;
-            $file_data = $_SESSION['file_data'];
+        $this->addPermission = user()->permission('add_holiday');
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
 
-            unset($_SESSION['file_data']);
-        } catch (\Throwable $th) {
-            $html = '<h3 class="text-danger text-center">Something went wrong, Please try again</h3></br>';
-            return response()->json([
-                'html' => true,
-                'response' => $html,
-            ]);
+        if (!$request->has('office_holiday_days')) {
+            return Reply::error(__('messages.checkDayHoliday'));
         }
-        $user = Auth::user();
 
-        foreach ($file_data as $key => $row) {
-            $holiday = LocalHoliday::where('created_by', Auth::user()->creatorId())->where('occasion', 'like', $row[$request['occasion']])->whereDate('start_date', $row[$request['start_date']])->whereDate('end_date', $row[$request['end_date']])->get();
+        $year = now()->format('Y');
 
-            if ($holiday->isEmpty()) {
-                try {
-                    LocalHoliday::create([
-                        'occasion' => $row[$request['occasion']],
-                        'start_date' => $row[$request['start_date']],
-                        'end_date' => $row[$request['end_date']],
-                        'created_by' => Auth::user()->id,
+        if ($request->has('year')) {
+            $year = $request->has('year');
+        }
+
+
+        if ($request->office_holiday_days != null && count($request->office_holiday_days) > 0) {
+            foreach ($request->office_holiday_days as $holiday) {
+                $day = $holiday;
+
+                $dateArray = $this->getDateForSpecificDayBetweenDates($year . '-01-01', $year . '-12-31', ($day));
+
+                foreach ($dateArray as $date) {
+                    Holiday::firstOrCreate([
+                        'date' => $date,
+                        'notification_sent' => $request->notification_sent ?: 'no',
+                        'occassion' => $request->occassion ? $request->occassion : now()->weekday($day)->translatedFormat('l')
                     ]);
-                } catch (\Throwable $e) {
-                    $flag = 1;
-                    $html .= '<tr>';
-
-                    $html .= '<td>' . (isset($row[$request['occasion']]) ? $row[$request['occasion']] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request['start_date']]) ? $row[$request['start_date']] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request['end_date']]) ? $row[$request['end_date']] : '-') . '</td>';
-
-                    $html .= '</tr>';
                 }
-            } else {
-                $flag = 1;
-                    $html .= '<tr>';
 
-                    $html .= '<td>' . (isset($row[$request['occasion']]) ? $row[$request['occasion']] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request['start_date']]) ? $row[$request['start_date']] : '-') . '</td>';
-                    $html .= '<td>' . (isset($row[$request['end_date']]) ? $row[$request['end_date']] : '-') . '</td>';
-
-                    $html .= '</tr>';
+                $this->googleCalendarEventMulti($day, $year);
             }
         }
 
-        $html .= '
-                        </table>
-                        <br />
-                        ';
+        $redirectUrl = 'table-view';
 
-        if ($flag == 1) {
-
-            return response()->json([
-                'html' => true,
-                'response' => $html,
-            ]);
-        } else {
-            return response()->json([
-                'html' => false,
-                'response' => 'Data Imported Successfully',
-            ]);
+        if (url()->previous() == route('holidays.index')) {
+            $redirectUrl = route('holidays.index');
         }
+
+        return Reply::successWithData(__('messages.recordSaved'), ['redirectUrl' => $redirectUrl]);
     }
 
-    public function get_holiday_data(Request $request)
+    public function getDateForSpecificDayBetweenDates($startDate, $endDate, $weekdayNumber)
     {
-        $arrayJson = [];
-        if ($request->get('calender_type') == 'google_calender') {
-            $type = 'holiday';
-            $arrayJson =  Utility::getCalendarData($type);
-        } else {
-            $data = LocalHoliday::where('created_by', \Auth::user()->creatorId())->get();
+        $startDate = strtotime($startDate);
+        $endDate = strtotime($endDate);
+
+        $dateArr = [];
+
+        do {
+            if (date('w', $startDate) != $weekdayNumber) {
+                $startDate += (24 * 3600); // add 1 day
+            }
+        } while (date('w', $startDate) != $weekdayNumber);
 
 
-            foreach ($data as $val) {
-                if (Auth::user()->type == 'employee') {
-                    $url = route('holiday.show', $val['id']);
-                } else {
-                    $url = route('holiday.edit', $val['id']);
+        while ($startDate <= $endDate) {
+            $dateArr[] = date('Y-m-d', $startDate);
+            $startDate += (7 * 24 * 3600); // add 7 days
+        }
+
+        return ($dateArr);
+    }
+
+    protected function googleCalendarEvent($event)
+    {
+        $module = GoogleCalendarModule::first();
+        $googleAccount = company();
+
+        if ($googleAccount->google_calendar_status == 'active' && $googleAccount->google_calendar_verification_status == 'verified' && $googleAccount->token && $module->holiday_status == 1) {
+
+            $google = new Google();
+
+            if ($event->date) {
+                $date = \Carbon\Carbon::parse($event->date)->shiftTimezone($googleAccount->timezone);
+
+                // Create event
+                $google = $google->connectUsing($googleAccount->token);
+
+                $eventData = new \Google_Service_Calendar_Event(array(
+                    'summary' => $event->occassion,
+                    'location' => $googleAccount->address,
+                    'colorId' => 1,
+                    'start' => array(
+                        'dateTime' => $date->copy()->startOfDay(),
+                        'timeZone' => $googleAccount->timezone,
+                    ),
+                    'end' => array(
+                        'dateTime' => $date->copy()->endOfDay(),
+                        'timeZone' => $googleAccount->timezone,
+                    ),
+                    'reminders' => array(
+                        'useDefault' => false,
+                        'overrides' => array(
+                            array('method' => 'email', 'minutes' => 24 * 60),
+                            array('method' => 'popup', 'minutes' => 10),
+                        ),
+                    ),
+                ));
+
+                try {
+                    if ($event->event_id) {
+                        $results = $google->service('Calendar')->events->patch('primary', $event->event_id, $eventData);
+                    } else {
+                        $results = $google->service('Calendar')->events->insert('primary', $eventData);
+                    }
+
+                    return $results->id;
+                } catch (\Google\Service\Exception $error) {
+                    if (is_null($error->getErrors())) {
+                        // Delete google calendar connection data i.e. token, name, google_id
+                        $googleAccount->name = null;
+                        $googleAccount->token = null;
+                        $googleAccount->google_id = null;
+                        $googleAccount->google_calendar_verification_status = 'non_verified';
+                        $googleAccount->save();
+                    }
                 }
-                $end_date = date_create($val->end_date);
-                date_add($end_date, date_interval_create_from_date_string("1 days"));
-                $arrayJson[] = [
-                    "id" => $val->id,
-                    "title" => $val->occasion,
-                    "start" => $val->start_date,
-                    "end" => date_format($end_date, "Y-m-d H:i:s"),
-                    "className" => $val->color,
-                    "textColor" => '#FFF',
-                    "allDay" => true,
-                    "url" => $url,
-                ];
             }
         }
 
-        return $arrayJson;
+        return $event->event_id;
+    }
+
+    protected function googleCalendarEventMulti($day, $year)
+    {
+        $googleAccount = company();
+        $module = GoogleCalendarModule::first();
+
+        if ($googleAccount->google_calendar_status == 'active' && $googleAccount->google_calendar_verification_status == 'verified' && $googleAccount->token && $module->holiday_status == 1) {
+            $google = new Google();
+
+            $allDays = $this->getDateForSpecificDayBetweenDates($year . '-01-01', $year . '-12-31', $day);
+
+            $holiday = Holiday::where(DB::raw('DATE(`date`)'), $allDays[0])->first();
+
+            $startDate = Carbon::parse($allDays[0]);
+
+            $frequency = 'WEEKLY';
+
+            $eventData = new \Google_Service_Calendar_Event();
+            $eventData->setSummary(now()->startOfWeek($day)->translatedFormat('l'));
+            $eventData->setColorId(7);
+            $eventData->setLocation('');
+
+            $start = new \Google_Service_Calendar_EventDateTime();
+            $start->setDateTime($startDate);
+            $start->setTimeZone($googleAccount->timezone);
+
+            $eventData->setStart($start);
+
+            $end = new \Google_Service_Calendar_EventDateTime();
+            $end->setDateTime($startDate);
+            $end->setTimeZone($googleAccount->timezone);
+
+            $eventData->setEnd($end);
+
+            $dy = substr(now()->startOfWeek($day)->translatedFormat('l'), 0, 2);
+
+            $eventData->setRecurrence(array('RRULE:FREQ=' . $frequency . ';COUNT=' . count($allDays) . ';BYDAY=' . $dy));
+
+            // Create event
+            $google->connectUsing($googleAccount->token);
+            // array for multiple
+
+            try {
+                if ($holiday->event_id) {
+                    $results = $google->service('Calendar')->events->patch('primary', $holiday->event_id, $eventData);
+                } else {
+                    $results = $google->service('Calendar')->events->insert('primary', $eventData);
+                }
+
+                $holidays = Holiday::where('occassion', now()->startOfWeek($day)->translatedFormat('l'))->get();
+
+                foreach ($holidays as $holiday) {
+                    $holiday->event_id = $results->id;
+                    $holiday->save();
+                }
+
+                return;
+            } catch (\Google\Service\Exception $error) {
+                if (is_null($error->getErrors())) {
+                    // Delete google calendar connection data i.e. token, name, google_id
+                    $googleAccount->name = null;
+                    $googleAccount->token = null;
+                    $googleAccount->google_id = null;
+                    $googleAccount->google_calendar_verification_status = 'non_verified';
+                    $googleAccount->save();
+                }
+            }
+        }
     }
 }

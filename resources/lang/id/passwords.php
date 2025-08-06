@@ -1,1 +1,10 @@
-<?php return ['password'=>'Passwords must be at least eight characters and match the confirmation.','reset'=>'Your password has been reset!','sent'=>'We have e-mailed your password reset link!','token'=>'This password reset token is invalid.','user'=>'We can\'t find a user with that e-mail address.','throttled'=>'You have requested password reset recently, please check your email.',];
+<?php 
+return [
+  'password' => 'Kata sandi minimal harus enam karakter dan cocok dengan konfirmasi.',
+  'reset' => 'Kata sandi Anda telah disetel ulang!. Harap tunggu, Anda akan diarahkan kembali ke halaman login beberapa saat lagi',
+  'sent' => 'Silakan periksa akun email Anda. Kami telah mengirimkan tautan pengaturan ulang kata sandi Anda melalui email!',
+  'token' => 'Token pengaturan ulang kata sandi ini tidak valid.',
+  'user' => 'Kami tidak dapat menemukan pengguna dengan alamat email itu.',
+  'throttled' => 'Harap tunggu sebelum mencoba lagi.',
+  'notMatch' => 'Kata sandi yang diberikan tidak cocok dengan kata sandi Anda saat ini.',
+];

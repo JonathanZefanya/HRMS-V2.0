@@ -1,18 +1,17 @@
-<?php
-
+<?php 
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | Authentication Language Lines
-    |--------------------------------------------------------------------------
-    |
-    | The following language lines are used during authentication for various
-    | messages that we need to display to the user. You are free to modify
-    | these language lines according to your application's requirements.
-    |
-    */
-
-    'failed' => 'بيانات الاعتماد هذه لا تتطابق مع سجلاتنا.',
-    'throttle' => 'عدد كبير جدًا من محاولات تسجيل الدخول. يرجى المحاولة مرة أخرى خلال: ثواني ثواني.',
+  'failed' => 'بيانات الاعتماد هذه لا تتطابق مع سجلاتنا.',
+  'failedLoginDisabled' => 'لقد تم تعطيل تسجيل الدخول من قبل المسؤول الخاص بك',
+  'failedBlocked' => 'حسابك مغلق!. يرجى الاتصال بالمسؤول لتمكينه.',
+  'throttle' => 'عدد كبير جدًا من محاولات تسجيل الدخول. يرجى المحاولة مرة أخرى خلال :seconds ثانية.',
+  'recaptchaFailed' => 'لم يتم التحقق من صحة Recaptcha.',
+  'sociaLoginFail' => 'حسابك غير موجود. يرجى الاشتراك',
+  'loginWrongCompany' => 'أنت تحاول تسجيل الدخول إلى الشركة الخاطئة.',
+  'signInGoogle' => 'الدخول مع جوجل',
+  'signInFacebook' => 'قم بتسجيل الدخول باستخدام الفيسبوك',
+  'signInLinkedin' => 'تسجيل الدخول مع لينكد إن',
+  'signInTwitter' => 'قم بتسجيل الدخول باستخدام تويتر',
+  'useEmail' => 'أو استخدم عنوان البريد الإلكتروني',
+  'email' => 'عنوان البريد الإلكتروني',
+  'next' => 'التالي',
 ];

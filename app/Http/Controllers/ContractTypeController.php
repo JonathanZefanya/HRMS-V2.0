@@ -2,194 +2,66 @@
 
 namespace App\Http\Controllers;
 
+use App\Helper\Reply;
+use App\Models\BaseModel;
 use App\Models\ContractType;
-use Illuminate\Http\Request;
+use App\Http\Requests\Admin\ContractType\StoreRequest;
+use App\Http\Requests\Admin\ContractType\UpdateRequest;
 
-class ContractTypeController extends Controller
+class ContractTypeController extends AccountBaseController
 {
-    /**
-     * Display a listing of the resource.
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function index()
-    {
-        if(\Auth::user()->can('Manage Contract Type'))
-        {
-            $contractTypes = ContractType::where('created_by', '=', \Auth::user()->creatorId())->get();
 
-            return view('contract_type.index')->with('contractTypes', $contractTypes);
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission Denied.'));
-        }
-    }
-
-    /**
-     * Show the form for creating a new resource.
-     *
-     * @return \Illuminate\Http\Response
-     */
     public function create()
     {
-        if(\Auth::user()->can('Create Contract Type'))
-        {
-            return view('contract_type.create');
-        }
-        else
-        {
-            return response()->json(['error' => __('Permission Denied.')], 401);
-        }
+        $this->addPermission = user()->permission('manage_contract_type');
+
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
+
+        $this->categories = ContractType::all();
+        return view('contracts.types.create', $this->data);
+
     }
 
-    /**
-     * Store a newly created resource in storage.
-     *
-     * @param \Illuminate\Http\Request $request
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function store(Request $request)
+    public function store(StoreRequest $request)
     {
-        if(\Auth::user()->can('Create Contract Type'))
-        {
-            $validator = \Validator::make(
-                $request->all(), [
-                                   'name' => 'required|max:20',
-                               ]
-            );
+        $this->addPermission = user()->permission('manage_contract_type');
+        abort_403(!in_array($this->addPermission, ['all', 'added']));
 
-            if($validator->fails())
-            {
-                $messages = $validator->getMessageBag();
+        $contract = new ContractType();
+        $contract->name = $request->name;
+        $contract->save();
 
-                return redirect()->route('contract_type.index')->with('error', $messages->first());
-            }
 
-            $contractType             = new ContractType();
-            $contractType->name       = $request->name;
-            $contractType->created_by = \Auth::user()->creatorId();
-            $contractType->save();
+        $categories = ContractType::all();
+        $options = BaseModel::options($categories, $contract);
 
-            return redirect()->route('contract_type.index')->with('success', __('Contract Type successfully created!'));
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission Denied.'));
-        }
+        return Reply::successWithData(__('messages.recordSaved'), ['data' => $options]);
+
     }
 
-    /**
-     * Display the specified resource.
-     *
-     * @param \App\ContractType $contractType
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function show(ContractType $contractType)
+    public function update(UpdateRequest $request, $id)
     {
-        return redirect()->route('contract_type.index');
+        $category = ContractType::findOrFail($id);
+        $category->name = strip_tags($request->name);
+        $category->save();
+
+        $categories = ContractType::all();
+
+        $options = BaseModel::options($categories);
+
+        return Reply::successWithData(__('messages.updateSuccess'), ['data' => $options]);
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     *
-     * @param \App\ContractType $contractType
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function edit(ContractType $contractType)
+    public function destroy($id)
     {
-        if(\Auth::user()->can('Edit Contract Type'))
-        {
-            if($contractType->created_by == \Auth::user()->creatorId())
-            {
-                return view('contract_type.edit', compact('contractType'));
-            }
-            else
-            {
-                return response()->json(['error' => __('Permission Denied.')], 401);
-            }
-        }
-        else
-        {
-            return response()->json(['error' => __('Permission Denied.')], 401);
-        }
+        abort_403(user()->permission('manage_contract_type') !== 'all');
+
+        ContractType::destroy($id);
+        $categories = ContractType::all();
+        $options = BaseModel::options($categories);
+
+        return Reply::successWithData(__('messages.deleteSuccess'), ['data' => $options]);
+
     }
 
-    /**
-     * Update the specified resource in storage.
-     *
-     * @param \Illuminate\Http\Request $request
-     * @param \App\ContractType $contractType
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function update(Request $request, ContractType $contractType)
-    {
-        // return redirect()->back()->with('error', __('This operation is not perform due to demo mode.'));
-
-        if(\Auth::user()->can('Edit Contract Type'))
-        {
-            if($contractType->created_by == \Auth::user()->creatorId())
-            {
-                $validator = \Validator::make(
-                    $request->all(), [
-                                       'name' => 'required|max:20',
-                                   ]
-                );
-
-                if($validator->fails())
-                {
-                    $messages = $validator->getMessageBag();
-
-                    return redirect()->route('contract_type.index')->with('error', $messages->first());
-                }
-
-                $contractType->name = $request->name;
-                $contractType->save();
-
-                return redirect()->route('contract_type.index')->with('success', __('Contract Type successfully updated!'));
-            }
-            else
-            {
-                return redirect()->back()->with('error', __('Permission Denied.'));
-            }
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission Denied.'));
-        }
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     *
-     * @param \App\ContractType $contractType
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function destroy(ContractType $contractType)
-    {
-        // return redirect()->back()->with('error', __('This operation is not perform due to demo mode.'));
-        
-        if(\Auth::user()->can('Delete Contract Type'))
-        {
-            if($contractType->created_by == \Auth::user()->creatorId())
-            {
-                $contractType->delete();
-
-                return redirect()->route('contract_type.index')->with('success', __('Contract Type successfully deleted!'));
-            }
-            else
-            {
-                return redirect()->back()->with('error', __('Permission Denied.'));
-            }
-        }
-        else
-        {
-            return redirect()->back()->with('error', __('Permission Denied.'));
-        }
-    }
 }
