@@ -1,4 +1,4 @@
-# Readme for Quantum Tech
+# Quantum Tech - HRMS CRM
 <p align="center">
     <a href="https://hrms.zyrex.win" target="_blank" rel="noopener">
         <img src="https://hrms.zyrex.win/user-uploads/app-logo/e8d97ded8b50fa5c2e46af975b5e05c7.png" alt="Quantum Tech Logo" width="220">
