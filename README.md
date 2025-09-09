@@ -5,6 +5,9 @@
     </a>
 </p>
 
+## Definition
+Quantum Tech - HRMS CRM is your comprehensive business solution designed to streamline and automate tasks, helping you save valuable time to focus on core business decisions.
+
 ## ⚡ Technical Details
 
 - Built with: **Laravel 10+**
@@ -30,11 +33,6 @@
 - 🔐 Custom role and permission management
 - 📈 Comprehensive reporting system
 - ⚙️ Extensive configuration options
-
-### Notes
-
-- Keep sensitive API keys in `.env` and use environment variables or GitHub Secrets for deployments.
-- If you see accidental secrets in the history, purge them and rotate keys immediately.
 
 ### 🔌 Plugins used in the app (tidy list)
 
