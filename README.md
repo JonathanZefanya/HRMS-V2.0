@@ -1,4 +1,36 @@
-# Readme for worksuite
+# Readme for Quantum Tech
+
+## ⚡ Technical Details
+
+- Built with: **Laravel 10+**
+- PHP: **8.2**
+- Database: **MySQL**
+
+## 🚀 Key Features
+
+- 🧾 Manage customers and leads
+- 📁 Track client projects, invoices, and proposals/estimates
+- 👥 Employee management with attendance and leave tracking
+- ✍️ E-signature enabled client contracts
+- 📊 Comprehensive project management with progress tracking
+- 🗂️ Kanban taskboard for visual work management
+- 📅 Gantt chart for project scheduling
+- 🔁 Invoice to credit note conversion
+- 🛍️ Product catalog management
+- 🎟️ Ticket management system
+- 💬 Internal chat functionality
+- 🔔 Real-time notifications via Slack, Pusher, and OneSignal
+- 🎨 Customizable theme settings
+- 💳 Multiple payment gateway integrations
+- 🔐 Custom role and permission management
+- 📈 Comprehensive reporting system
+- ⚙️ Extensive configuration options
+
+### Notes
+
+- Keep sensitive API keys in `.env` and use environment variables or GitHub Secrets for deployments.
+- If you see accidental secrets in the history, purge them and rotate keys immediately.
+
 ### Plugins used in the app
 
 <ol>
