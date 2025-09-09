@@ -5,15 +5,19 @@
             <div class="d-block ">
                 <h5 class="f-15 f-w-500 mb-20 text-darkest-grey"> @lang('modules.dashboard.followUps') </h5>
                 <div class="d-flex">
-                    <p class="mb-0 f-21 font-weight-bold text-blue d-grid mr-5">
-                        {{ $pendingDealFollowUps }}<span
-                            class="f-12 font-weight-normal text-lightest">@lang('app.pending')</span>
-                    </p>
+                    <a href="{{ route('deals.index') . '?assignee=me' }}">
+                        <p class="mb-0 f-21 font-weight-bold text-blue d-grid mr-5">
+                            {{ $pendingDealFollowUps }}<span
+                                class="f-12 font-weight-normal text-lightest">@lang('app.pending')</span>
+                        </p>
+                    </a>
 
-                    <p class="mb-0 f-21 font-weight-bold text-success d-grid">
-                        {{ $completedDealFollowUps }}<span
-                            class="f-12 font-weight-normal text-lightest">@lang('app.upcoming')</span>
-                    </p>
+                    <a href="{{ route('deals.index') . '?assignee=me' }}">
+                        <p class="mb-0 f-21 font-weight-bold text-success d-grid">
+                            {{ $completedDealFollowUps }}<span
+                                class="f-12 font-weight-normal text-lightest">@lang('app.upcoming')</span>
+                        </p>
+                    </a>
                 </div>
             </div>
             <div class="d-block">

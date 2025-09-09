@@ -293,6 +293,42 @@ $addTimelogPermission = user()->permission('add_timelogs');
 
     });
 
+    $('body').on('click', '.revert-timelog-to-pending', function() {
+        const id = $(this).data('time-id');
+        let url = "{{ route('timelogs.revert_to_pending', ':id') }}";
+        url = url.replace(':id', id);
+        const token = '{{ csrf_token() }}';
+        
+        Swal.fire({
+            title: '@lang("messages.sweetAlertTitle")',
+            text: '@lang("messages.revertTimelogToPending")',
+            icon: 'warning',
+            showCancelButton: true,
+            focusConfirm: false,
+            confirmButtonText: '@lang("messages.confirm")',
+            cancelButtonText: '@lang("app.cancel")',
+            buttonsStyling: false,
+            customClass: {
+                confirmButton: 'btn btn-primary mr-3',
+                cancelButton: 'btn btn-secondary'
+            }
+        }).then((result) => {
+            if (result.isConfirmed) {
+                $.easyAjax({
+                    url: url,
+                    type: "POST",
+                    data: {
+                        id: id,
+                        _token: token
+                    },
+                    success: function (data) {
+                        showTable();
+                    }
+                });
+            }
+        });
+    });
+
     const applyQuickAction = () => {
         var rowdIds = $("#timelogs-table input:checkbox:checked").map(function() {
             return $(this).val();

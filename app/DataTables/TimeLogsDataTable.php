@@ -78,6 +78,14 @@ class TimeLogsDataTable extends BaseDataTable
                             ' . trans('app.reject') . '
                         </a>';
                     }
+                    
+                    // Show revert to pending option for approved or rejected timelogs
+                    if (($row->approved || $row->rejected) && $reportingManager && $logTimeFor->approval_required == 1) {
+                        $action .= '<a class="dropdown-item revert-timelog-to-pending" href="javascript:;" data-time-id="' . $row->id . '">
+                                <i class="fa fa-undo mr-2"></i>
+                                ' . trans('app.revert_to_pending') . '
+                            </a>';
+                    }
                 }
 
                 if (
@@ -264,10 +272,10 @@ class TimeLogsDataTable extends BaseDataTable
         }
 
         if (!is_null($employee) && $employee !== 'all') {
-            $model->where(function ($q) use ($userId, $employee, $logTimeFor) {
+            $model->where(function ($q) use ($employee, $logTimeFor, $userId) {
                 $q->where('project_time_logs.user_id', $employee);
 
-                ($this->approveTimelogPermission == 'all' && $logTimeFor->approval_required == 1) ? $q->orWhere('employee_details.reporting_to', $userId) : '';
+                ($this->approveTimelogPermission == 'all' && $logTimeFor->approval_required == 1) ? $q->orWhere('employee_details.reporting_to', $employee) : '';
             });
         }
 
@@ -285,9 +293,15 @@ class TimeLogsDataTable extends BaseDataTable
 
         if (!is_null($approved) && $approved !== 'all') {
             if ($approved == 2) {
+                // Active timers (no end time)
                 $model->whereNull('project_time_logs.end_time');
-            } else {
+            } elseif ($approved == 3) {
+                $model->where('project_time_logs.rejected', '=', 1)->where('project_time_logs.approved', '=', 0);
+            } elseif ($approved == 1) {
                 $model->where('project_time_logs.approved', '=', $approved);
+            } elseif ($approved == 0) {
+                $model->where('project_time_logs.approved', '=', 0)
+                      ->where('project_time_logs.rejected', '=', 0);
             }
         }
 
@@ -351,6 +365,10 @@ class TimeLogsDataTable extends BaseDataTable
             }
         }
 
+        if($employee != 'all') {
+            $model->where('project_time_logs.user_id', $employee);
+        }
+
         if (!$this->ignoreDeletedAtCondition) {
             $model->whereNull('tasks.deleted_at');
         }
@@ -384,9 +402,9 @@ class TimeLogsDataTable extends BaseDataTable
                 }',
             ]);
 
-        if (canDataTableExport()) {
-            $dataTable->buttons(Button::make(['extend' => 'excel', 'text' => '<i class="fa fa-file-export"></i> ' . trans('app.exportExcel')]));
-        }
+        // if (canDataTableExport()) {
+        //     $dataTable->buttons(Button::make(['extend' => 'excel', 'text' => '<i class="fa fa-file-export"></i> ' . trans('app.exportExcel')]));
+        // }
 
         return $dataTable;
     }

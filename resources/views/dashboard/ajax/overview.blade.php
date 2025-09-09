@@ -43,7 +43,7 @@
 
     @if (in_array('timelogs', user_modules()) && in_array('total_hours_logged', $activeWidgets))
         <div class="col-xl-3 col-lg-6 col-md-6">
-            <a href="{{ route('time-log-report.index') }}">
+            <a href="{{ route('timelogs.index') }}">
                 <x-cards.widget :title="__('modules.dashboard.totalHoursLogged')" :value="$counts->totalHoursLogged"
                                 icon="clock">
                 </x-cards.widget>
@@ -266,15 +266,14 @@
                         <tr>
                             <td class="pl-20">
                                 <h5 class="f-13 text-darkest-grey"><a
-                                        href="{{ route('deals.show', [$item->id]) }}">{{ $item->client_name_salutation }}</a>
+                                        href="{{ route('deals.show', [$item->id]) }}">{{ $item->client_name }}</a>
                                 </h5>
                                 <div class="text-muted">{{ $item->company_name }}</div>
                             </td>
                             <td>
-
                                 {{ \Carbon\Carbon::parse($item->follow_up_date_past)->timezone(company()->timezone)->translatedFormat(company()->date_format) }}
                             </td>
-                            <td class="pr-20 text-right">
+                            <td class="pr-20 pl-20">
                                 @if ($item->agent_id)
                                     <x-employee :user="$item->leadAgent->user"/>
                                 @endif

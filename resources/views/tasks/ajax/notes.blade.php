@@ -135,6 +135,7 @@
     $('#cancel-note').click(function () {
         $('#save-note-data-form').addClass('d-none');
         $('#add-notes').closest('.row').removeClass('d-none');
+        return false;
     });
 
     var atValues = @json($taskuserData);

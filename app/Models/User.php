@@ -523,7 +523,9 @@ class User extends BaseModel implements AuthenticatableContract, AuthorizableCon
 
     public function reportingTeam(): HasMany
     {
-        return $this->hasMany(EmployeeDetails::class, 'reporting_to');
+        return $this->hasMany(EmployeeDetails::class, 'reporting_to')->whereHas('user', function ($query) {
+            $query->where('status', 'active');
+        });
     }
 
     public function tasks(): BelongsToMany
@@ -653,7 +655,7 @@ class User extends BaseModel implements AuthenticatableContract, AuthorizableCon
         $users = User::withRole('employee')
             ->join('employee_details', 'employee_details.user_id', '=', 'users.id')
             ->leftJoin('designations', 'employee_details.designation_id', '=', 'designations.id')
-            ->select('users.id', 'users.company_id', 'users.name', 'users.email', 'users.created_at', 'users.image', 'designations.name as designation_name', 'users.email_notifications', 'users.mobile', 'users.country_id', 'users.status');
+            ->select('users.id', 'users.company_id', 'users.name', 'users.email', 'users.created_at', 'users.image', 'designations.name as designation_name', 'users.email_notifications', 'users.mobile', 'users.country_id', 'users.status', 'users.last_activity');
 
         if (!is_null($exceptId)) {
             if (is_array($exceptId)) {

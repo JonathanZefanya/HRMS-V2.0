@@ -22,13 +22,31 @@ class AutoFollowUpReminderListener
 
         $companyId = $event->followup->lead->company_id;
 
-        $adminUserIds = User::allAdmins($companyId)->pluck('id')->toArray();
+        $adminUsers = User::allAdmins($companyId);
+        $usersToNotify = collect($adminUsers);
 
-        /** @phpstan-ignore-next-line */
-        $notifyUser = (is_null($event->followup->lead->leadAgent)) ? User::whereIn('id', $adminUserIds)->get() : $event->followup->lead->leadAgent->user;
+        // Add lead agent if assigned
+        if (!is_null($event->followup->lead->leadAgent)) {
+            $usersToNotify->push($event->followup->lead->leadAgent->user);
+        }
 
-        if ($notifyUser) {
-            Notification::send($notifyUser, new AutoFollowUpReminder($event->followup,$event->subject));
+        // Add the user who created the follow-up
+        $followUpCreator = User::find($event->followup->added_by);
+        if ($followUpCreator) {
+            $usersToNotify->push($followUpCreator);
+        }
+
+        // Add the user who is watching the deal
+        $dealWatcher = User::find($event->followup->lead->deal_watcher);
+        if ($dealWatcher) {
+            $usersToNotify->push($dealWatcher);
+        }
+
+        // Remove duplicates (in case any users are duplicated)
+        $usersToNotify = $usersToNotify->unique('id');
+
+        if ($usersToNotify->isNotEmpty()) {
+            Notification::send($usersToNotify, new AutoFollowUpReminder($event->followup,$event->subject));
         }
 
     }

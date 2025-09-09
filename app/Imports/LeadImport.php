@@ -7,6 +7,8 @@ use Maatwebsite\Excel\Concerns\ToArray;
 class LeadImport implements ToArray
 {
 
+    protected array $processedData = [];
+
     public static function fields(): array
     {
         return array(
@@ -29,7 +31,13 @@ class LeadImport implements ToArray
 
     public function array(array $array): array
     {
+        $this->processedData = $array;
         return $array;
+    }
+
+    public function getProcessedData(): array
+    {
+        return $this->processedData;
     }
 
 }

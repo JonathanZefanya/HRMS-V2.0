@@ -30,8 +30,10 @@ $addAttendancePermission = user()->permission('add_attendance');
                         @endphp
                         <td class="px-1">
                             @if ($day == 'Leave')
-                                <span data-toggle="tooltip" data-original-title="{{ $leaveReasons[$userId][$key2] }}"><i
-                                        class="fa fa-plane-departure text-red"></i></span>
+                            <span data-toggle="tooltip" data-html="true"
+                            data-original-title="{{ \Illuminate\Support\Str::limit(strip_tags($leaveReasons[$userId][$key2] ?? ''), 50, '...') }}">
+                            <i class="fa fa-plane-departure text-red"></i>
+                        </span>
                             @elseif ($day == 'Day Off')
                                 <span data-toggle="tooltip" data-original-title="@lang('modules.attendance.dayOff')"><i
                                         class="fa fa-calendar-week text-red"></i></span>

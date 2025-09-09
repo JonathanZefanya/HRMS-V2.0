@@ -356,7 +356,7 @@ class ContractController extends AccountBaseController
         </style>';
 
         $pdf->loadHTML($customCss . view('contracts.contract-pdf', $this->data)->render());
-        $filename = 'contract-' . $this->contract->id;
+        $filename = $this->contract->contract_number . '-' . __('app.menu.contract');
 
         return $pdf->download($filename . '.pdf');
 

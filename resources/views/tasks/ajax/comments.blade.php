@@ -205,6 +205,7 @@
     $('#cancel-comment').click(function() {
         $('#save-comment-data-form').addClass('d-none');
         $('#add-comment').closest('.row').removeClass('d-none');
+        return false;
 
     });
         //quill mention

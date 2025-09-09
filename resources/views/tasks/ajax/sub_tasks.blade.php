@@ -392,6 +392,7 @@
         $('#cancel-subtask').click(function () {
             $('#save-subtask-data-form').addClass('d-none');
             $('#add-sub-task').closest('.row').removeClass('d-none');
+            return false;
         });
 
         $('body').on('click', '.delete-sub-task-file', function () {

@@ -641,6 +641,9 @@ class TasksDataTable extends BaseDataTable
             });
         }
 
+        // get only those wher repeat cycles is null
+        $model->whereNull('tasks.repeat_cycles');
+
         if ($request->assignedBY != '' && $request->assignedBY != null && $request->assignedBY != 'all') {
             $model->where('creator_user.id', '=', $request->assignedBY);
         }

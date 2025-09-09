@@ -247,7 +247,7 @@ class PermissionRole extends BaseModel
                     ->first();
 
                 if (!$permissionRole) {
-                    PermissionRole::create([
+                    PermissionRole::firstOrCreate([
                         'permission_id' => $permission->id,
                         'role_id' => $role->id,
                         'permission_type_id' => PermissionType::NONE
@@ -264,7 +264,7 @@ class PermissionRole extends BaseModel
                         ->first();
 
                     if (!$userPermission) {
-                        UserPermission::create([
+                        UserPermission::firstOrCreate([
                             'permission_id' => $permission->id,
                             'user_id' => $roleuser->user_id,
                             'permission_type_id' => PermissionType::NONE

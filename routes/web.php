@@ -713,6 +713,7 @@ Route::group(['middleware' => 'auth', 'prefix' => 'account'], function () {
         Route::resource('timelog-break', ProjectTimelogBreakController::class);
         Route::get('by-employee', [TimelogController::class, 'byEmployee'])->name('timelogs.by_employee');
         Route::get('export', [TimelogController::class, 'export'])->name('timelogs.export');
+        Route::get('export-time-logs', [TimelogController::class, 'exportTimeLogs'])->name('timelogs.export_time_logs');
         Route::get('show-active-timer', [TimelogController::class, 'showActiveTimer'])->name('timelogs.show_active_timer');
         Route::get('show-timer', [TimelogController::class, 'showTimer'])->name('timelogs.show_timer');
         Route::post('start-timer', [TimelogController::class, 'startTimer'])->name('timelogs.start_timer');
@@ -725,6 +726,7 @@ Route::group(['middleware' => 'auth', 'prefix' => 'account'], function () {
         Route::post('employee_data', [TimelogController::class, 'employeeData'])->name('timelogs.employee_data');
         Route::post('user_time_logs', [TimelogController::class, 'userTimelogs'])->name('timelogs.user_time_logs');
         Route::post('approve_timelog', [TimelogController::class, 'approveTimelog'])->name('timelogs.approve_timelog');
+        Route::post('revert-timelog-to-pending', [TimelogController::class, 'revertTimelogToPending'])->name('timelogs.revert_to_pending');
         Route::get('stopper-alert/{id}', [TimelogController::class, 'stopperAlert'])->name('timelogs.stopper_alert');
 
         Route::post('change-status', [WeeklyTimesheetController::class, 'changeStatus'])->name('weekly-timesheets.change_status');
@@ -917,3 +919,24 @@ Route::group(['middleware' => 'auth', 'prefix' => 'account'], function () {
     Route::resource('gantt_link', GanttLinkController::class);
 
 });
+
+// Test broadcasting
+Route::get('/test-broadcast', function() {
+    try {
+        event(new \Modules\Chat\Events\MessageSent(\Modules\Chat\Entities\ChatMessage::first()));
+        return response()->json(['success' => true, 'message' => 'Event broadcasted successfully']);
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+    }
+})->name('test-broadcast');
+
+// Debug broadcasting configuration 
+Route::get('/debug-broadcast', function() {
+    return response()->json([
+        'broadcast_driver' => config('broadcasting.default'),
+        'pusher_key' => config('broadcasting.connections.pusher.key'),
+        'pusher_cluster' => config('broadcasting.connections.pusher.options.host'),
+        'app_env' => config('app.env'),
+        'queue_connection' => config('queue.default')
+    ]);
+})->name('debug-broadcast');

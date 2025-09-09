@@ -407,32 +407,32 @@
         <p class="f-15 text-black">{!! nl2br(pdfStripTags($contract->contract_detail)) !!}</p>
 
         @if ($contract->amount != 0)
-            <div class="text-right pt-3 border-top description">
+            <div class="text-right pt-3 border-top description" align="right">
                 <h4>@lang('modules.contracts.contractValue'):
                     {{ $contract->amount . ' ' . $contract->currency->currency_code }}</h4>
             </div>
         @endif
 
         <hr class="mt-1 mb-1">
-        @if ($contract->signature)
-            <div style="text-align: left; margin-top: 10px">
-                <h4 class="name" style="margin-bottom: 20px;">@lang('modules.estimates.clientsignature')</h4>
-                {!! Html::image($contract->signature->signature, '', ['class' => '', 'height' => '75px']) !!}
-                <p>Client Name:- {{ $contract->signature->full_name }}<br>
-                    Place:- {{ $contract->signature->place }}<br>
-                    Date:- {{ $contract->signature->date->timezone($company->timezone) }}
-                </p>
-            </div>
-        @endif
-
         @if ($contract->company_sign)
-            <div style="text-align: right; margin-top: -260px">
-                <h4 class="name" style="margin-bottom: 10px;">@lang('modules.estimates.companysignature')</h4>
+            <div style="text-align: left; margin-top: 10px">
+                <h4 class="name" style="margin-bottom: 20px;">@lang('modules.estimates.companysignature')</h4>
                 <img src="{{ $contract->company_signature }}" style="width: 200px;">
                 <p>Date:- {{ $contract->sign_date->timezone($company->timezone) }}</p>
                 @if($contract->signer)
                 <p style="margin-top: -16px;">Sign By : {{ $contract->signer ? $contract->signer->name : '--' }}</p>
                 @endif
+            </div>
+        @endif
+
+        @if ($contract->signature)
+            <div style="text-align: right; margin-top: -260px">
+                <h4 class="name" style="margin-bottom: 10px;">@lang('modules.estimates.clientsignature')</h4>
+                {!! Html::image($contract->signature->signature, '', ['class' => '', 'height' => '75px']) !!}
+                <p>Client Name:- {{ $contract->signature->full_name }}<br>
+                    Place:- {{ $contract->signature->place }}<br>
+                    Date:- {{ $contract->signature->date->timezone($company->timezone) }}
+                </p>
             </div>
         @endif
     </div>

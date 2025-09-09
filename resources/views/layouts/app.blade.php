@@ -723,6 +723,13 @@
     </script>
 @endif
 
+
+<!-- Chat Module Component -->
+
+@if (in_array('chat', user_modules()))
+    @include('chat::index')
+@endif
+
 </body>
 
 </html>

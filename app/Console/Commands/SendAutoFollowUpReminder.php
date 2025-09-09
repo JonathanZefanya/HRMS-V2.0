@@ -73,6 +73,17 @@ class SendAutoFollowUpReminder extends Command
 
         }
 
+        // Send notification exactly at the next_follow_up_date time
+        $dealFollowUps = DealFollowUp::with('lead', 'lead.leadAgent', 'lead.leadAgent.user')
+            ->whereHas('lead', function ($query) use ($company) {
+                $query->where('company_id', $company->id);
+            })
+            ->whereRaw("DATE_FORMAT(next_follow_up_date, '%Y-%m-%d %H:%i') = ?", [now($company->timezone)->format('Y-m-d H:i')])
+            ->get();
+        foreach ($dealFollowUps as $followup) {
+            event(new AutoFollowUpReminderEvent($followup, false));
+        }
+
     }
 
 }

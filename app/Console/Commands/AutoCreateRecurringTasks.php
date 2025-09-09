@@ -47,6 +47,8 @@ class AutoCreateRecurringTasks extends Command
                     ->where('company_id', $company->id)
                     ->get();
 
+                
+
                 $repeatedTasks->each(function ($task) use ($now, $company) {
 
                     if ($task->repeat_cycles == -1 || $task->recurrings_count < ($task->repeat_cycles - 1)) { // Subtract 1 to include original task
@@ -77,8 +79,10 @@ class AutoCreateRecurringTasks extends Command
                         elseif ($task->repeat_type == 'year' && ($adjustedStartDate->copy()->addYears($repeatCount)->isPast() || $adjustedStartDate->copy()->addYears($repeatCount)->isToday())) {
                             $isTaskCreate = true;
                         }
-
+                       
                         if ($isTaskCreate) {
+                            // Check if there are active users assigned to this task
+                            
                             $this->createTask($task, $repeatStartDate, $repeatDueDate, $company->default_task_status, $subTasks);
 
                             // Mark repeat complete if cycles are complete
@@ -86,7 +90,7 @@ class AutoCreateRecurringTasks extends Command
                                 $task->repeat_complete = 1;
                                 $task->save();
                             }
-
+                            
                         }
 
                     }
@@ -155,11 +159,21 @@ class AutoCreateRecurringTasks extends Command
             }
         }
 
-        $newTask->users()->sync($task->users->pluck('id')->toArray());
+        // Only sync active users to the new task
+        $activeUsers = $task->users()->where('status', 'active')->pluck('users.id')->toArray();
+        
+        if (empty($activeUsers)) {
+            $this->warn('No active users found for recurring task ID: ' . $task->id . '. Skipping user assignment.');
+        }else{
+            $newTask->users()->sync($activeUsers);
+        }
+        
         $newTask->labels()->sync($task->labels->pluck('id')->toArray());
 
-        foreach ($newTask->users as $user) {
-            event(new TaskEvent($newTask, $user, 'NewTask'));
+        if (!empty($activeUsers)) {
+            foreach ($newTask->users as $user) {
+                event(new TaskEvent($newTask, $user, 'NewTask'));
+            }
         }
 
     }

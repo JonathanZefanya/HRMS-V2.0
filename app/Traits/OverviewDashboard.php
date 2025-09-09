@@ -45,7 +45,15 @@ trait OverviewDashboard
                 DB::raw('(select count(projects.id) from `projects` WHERE projects.company_id = ' . company()->id . ') as totalProjects'),
                 DB::raw('(select count(invoices.id) from `invoices` where (status = "unpaid" or status = "partial") AND invoices.company_id = ' . company()->id . ') as totalUnpaidInvoices'),
                 DB::raw('(select sum(project_time_logs.total_minutes) from `project_time_logs` where approved = "1" AND project_time_logs.company_id = ' . company()->id . ') as totalHoursLogged'),
-                DB::raw('(select sum(project_time_log_breaks.total_minutes) from `project_time_log_breaks` WHERE project_time_log_breaks.company_id = ' . company()->id . ') as totalBreakMinutes'),
+                // Only sum break minutes for breaks that belong to approved timelogs
+                DB::raw('(
+                    select sum(project_time_log_breaks.total_minutes)
+                    from `project_time_log_breaks`
+                    inner join project_time_logs on project_time_logs.id = project_time_log_breaks.project_time_log_id
+                    where project_time_logs.approved = "1"
+                        and project_time_log_breaks.company_id = ' . company()->id . '
+                        and project_time_logs.company_id = ' . company()->id . '
+                ) as totalBreakMinutes'),
                 DB::raw('(select count(tasks.id) from `tasks` where tasks.board_column_id=' . $completedTaskColumn->id . ' and is_private = "0" AND tasks.company_id = ' . company()->id . ') as totalCompletedTasks'),
                 DB::raw('(select count(tasks.id) from `tasks` where tasks.board_column_id != ' . $completedTaskColumn->id . ' and is_private = "0" and tasks.deleted_at IS NULL AND tasks.company_id = ' . company()->id . ') as totalPendingTasks'),
                 DB::raw('(select count(distinct(attendances.user_id)) from `attendances` inner join users as atd_user on atd_user.id=attendances.user_id inner join role_user on role_user.user_id=atd_user.id inner join roles on roles.id=role_user.role_id WHERE roles.name = "employee" and attendances.clock_in_time >= "' . today(company()->timezone)->setTimezone('UTC')->toDateTimeString() . '" and atd_user.status = "active" AND attendances.company_id = ' . company()->id . ') as totalTodayAttendance'),

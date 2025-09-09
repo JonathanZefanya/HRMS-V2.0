@@ -1821,6 +1821,7 @@ return array(
     'timelogAlreadyExist' => 'Time-log already exist for this user.',
     'module' => array(
         'clients' => 'Clients',
+        'chat' => 'Chat Module',
         'employees' => 'Employees',
         'projects' => 'Projects',
         'proposals' => 'Proposals',
@@ -1869,6 +1870,7 @@ return array(
         'performance' => 'Performance',
         'Policy' => 'Policy Center',
         'biometric' => 'Biometric',
+        'servermanager' => 'Server Manager',
     ),
     'projectSettings' => array(
         'sendNotificationsTo' => 'Send Reminder To',

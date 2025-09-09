@@ -150,11 +150,12 @@ $manageProjectTemplatePermission = user()->permission('manage_project_template')
                 <a href="{{ route('projects.index') }}" class="btn btn-secondary f-14" data-toggle="tooltip"
                     data-original-title="@lang('app.menu.projects')"><i class="side-icon bi bi-list-ul"></i></a>
 
+                    <a href="{{ route('projects.archive') }}" class="btn btn-secondary f-14 btn-active" data-toggle="tooltip"
+                    data-original-title="@lang('app.archive')"><i class="side-icon bi bi-archive"></i></a>
+
                     <a href="{{ route('project-calendar.index') }}" class="btn btn-secondary f-14" data-toggle="tooltip"
                     data-original-title="@lang('app.menu.calendar')"><i class="side-icon bi bi-calendar"></i></a>
 
-                <a href="{{ route('projects.archive') }}" class="btn btn-secondary f-14 btn-active" data-toggle="tooltip"
-                    data-original-title="@lang('app.archive')"><i class="side-icon bi bi-archive"></i></a>
             </div>
         </div>
         <!-- Add Task Export Buttons End -->

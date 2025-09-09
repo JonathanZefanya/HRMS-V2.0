@@ -161,6 +161,21 @@ class DealsDataTable extends BaseDataTable
             return $action;
         });
 
+        // Add export-only columns for client_name and company_name
+        $datatables->addColumn('export_client_name', function ($row) {
+            // Only for export, just return the client name
+            $client_name = $row->client_name;
+            if ($row->salutation instanceof Salutation || is_string($row->salutation)) {
+                $salutationLabel = ($row->salutation instanceof Salutation) ? $row->salutation->label() : Salutation::from($row->salutation)->label();
+                $client_name = $salutationLabel . ' ' . $client_name;
+            }
+            return $client_name;
+        });
+        $datatables->addColumn('export_company_name', function ($row) {
+            // Only for export, just return the company name
+            return $row->company_name;
+        });
+
         $datatables->addColumn('client_name', function ($row) {
             $label = '';
 
@@ -465,7 +480,11 @@ class DealsDataTable extends BaseDataTable
             '#' => ['data' => 'DT_RowIndex', 'orderable' => false, 'searchable' => false, 'visible' => false, 'title' => '#'],
             __('app.id') => ['data' => 'id', 'name' => 'id', 'title' => __('app.id'), 'visible' => showId()],
             __('modules.deal.dealName') => ['data' => 'name', 'name' => 'name', 'title' => __('modules.deal.dealName')],
-            __('modules.leadContact.leadName') => ['data' => 'client_name', 'name' => 'leads.client_name', 'title' => __('modules.leadContact.leadName')],
+            // For datatable view, show the combined client_name (with company name in the cell)
+            __('modules.leadContact.leadName') => [ 'data' => 'client_name', 'name' => 'leads.client_name', 'title' => __('modules.leadContact.leadName'), 'exportable' => false],
+            // For export, split into two columns: client_name and company_name
+            __('modules.leadContact.leadName') . ' (' . __('app.client') . ')' => ['data' => 'export_client_name', 'name' => 'leads.client_name', 'title' => __('modules.leadContact.leadName'), 'visible' => false, 'exportable' => true],
+            __('modules.lead.companyName') => ['data' => 'export_company_name', 'name' => 'leads.company_name', 'title' => __('modules.lead.companyName'), 'visible' => false, 'exportable' => true],
             __('modules.lead.email') => ['data' => 'lead_email', 'name' => 'email', 'title' => __('app.contactDetails'), 'exportable' => false],
             __('app.lead') . ' ' . __('modules.lead.email') => ['data' => 'export_email', 'name' => 'email', 'title' => __('app.lead') . ' ' . __('modules.lead.email'), 'exportable' => true, 'visible' => false],
             __('modules.deal.pipeline') => ['data' => 'lead_pipeline_id', 'name' => 'lead_pipeline_id', 'exportable' => true, 'visible' => false, 'title' => __('modules.deal.pipeline')],

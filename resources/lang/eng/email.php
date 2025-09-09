@@ -459,6 +459,7 @@ return array(
         'nextFollowUpDate' => 'Next follow up date',
         'action' => 'View Follow Up Details',
         'nextFollowUpTime' => 'Next follow up time',
+        'remark' => 'Remark',
         'followUpLead' => 'Followup Deal Name',
         'followUpLeadText' => 'You have new follow up',
     ),

@@ -9,7 +9,7 @@
         <th>@lang('app.name')</th>
         <th align="center">@lang('modules.timeLogs.totalWorkingHours')</th>
         <th align="center">@lang('modules.timeLogs.totalLoggedHours')</th>
-        <th align="center">@lang('modules.timeLogs.totalNotLoggedHours')</th>
+        {{-- <th align="center">@lang('modules.timeLogs.totalNotLoggedHours')</th> --}}
         <th align="center">@lang('modules.timeLogs.leavesTaken')</th>
         <th align="center">@lang('modules.timeLogs.holiday')</th>
     </tr>
@@ -29,12 +29,13 @@
                     {{ ((intdiv($item->total_minutes , 60) > 0) ? intdiv($item->total_minutes , 60) .' hr ' : '') .((($item->total_minutes % 60) > 0 && intdiv($item->total_minutes , 60) > 0) ? ' ' : ''). ((($item->total_minutes % 60) > 0) ? (($item->total_minutes % 60 <=1 ) ? ($item->total_minutes % 60) .' minute' : ($item->total_minutes % 60) .' minutes') : '') }}
                 @endif
             </td>
-            <td align="center">
+            {{-- <td align="center">
                 @if ($totalWorkingHours == 0)
                     {{ $totalWorkingHours . ' hr'}}
                 @else
-                    {{ ((intdiv($totalUntrackedHours , 60) > 0) ? intdiv($totalUntrackedHours , 60) .' hr ' : '') .((($totalUntrackedHours % 60) > 0 && intdiv($totalUntrackedHours , 60) > 0) ? ' ' : ''). ((($totalUntrackedHours % 60) > 0) ? (($totalUntrackedHours % 60 <=1 ) ? ($totalUntrackedHours % 60) .' minute' : ($totalUntrackedHours % 60) .' minutes') : '') }}</td>
+                    {{ ((intdiv($totalUntrackedHours , 60) > 0) ? intdiv($totalUntrackedHours , 60) .' hr ' : '') .((($totalUntrackedHours % 60) > 0 && intdiv($totalUntrackedHours , 60) > 0) ? ' ' : ''). ((($totalUntrackedHours % 60) > 0) ? (($totalUntrackedHours % 60 <=1 ) ? ($totalUntrackedHours % 60) .' minute' : ($totalUntrackedHours % 60) .' minutes') : '') }}
                 @endif
+            </td> --}}
             <td align="center">{{ optional($item)->total_leaves ?? 0 }}</td>
             <td align="center">{{ $item->holidays->count() }}</td>
         </tr>

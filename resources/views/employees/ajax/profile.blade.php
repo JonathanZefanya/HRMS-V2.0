@@ -274,17 +274,17 @@ $viewAppreciationPermission = user()->permission('view_appreciation');
 
                         <x-cards.data class="mb-4">
                             <div class="d-flex justify-content-between">
-                                    <div class="col-6">
+                                    {{-- <div class="col-6">
                                         <p class="f-14 text-dark-grey">@lang('modules.employees.reportingTo')</p>
                                         @if ($employee->employeeDetail->reportingTo)
                                             <x-employee :user="$employee->employeeDetail->reportingTo" />
                                         @else
                                         --
                                         @endif
-                                    </div>
+                                    </div> --}}
 
                                 @if ($employee->reportingTeam)
-                                    <div class="col-6">
+                                    <div class="col-12">
                                         <p class="f-14 text-dark-grey">@lang('modules.employees.reportingTeam')</p>
                                         @if (count($employee->reportingTeam) > 0)
                                             @if (count($employee->reportingTeam) > 1)

@@ -186,7 +186,7 @@ $canEditTicket = ($editTicketPermission == 'all' || ($editTicketPermission == 'o
                 </div>
                 <!-- END -->
                 <!-- TICKET MESSAGE START -->
-                <div class="ticket-msg border-right-grey" data-menu-vertical="1" data-menu-scroll="1" style="max-height: 400px; overflow-y: auto;"
+                <div class="ticket-msg border-right-grey" data-menu-vertical="1" data-menu-scroll="1"
                     data-menu-dropdown-timeout="500" id="ticketMsg">
                     @foreach ($ticket->reply as $reply)
                     @if (!in_array('client', user_roles()) || $reply->type != 'note')
@@ -979,30 +979,30 @@ $canEditTicket = ($editTicketPermission == 'all' || ($editTicketPermission == 'o
 
                         ($('#ticket-status').val() != 'closed') ? $('#ticket-closed').show() :  $('#ticket-closed').hide();
 
-                        switch (status) {
-                            case 'open':
-                                var statusHtml =
-                                    '<i class="fa fa-circle mr-2 text-red"></i>@lang("app.open")';
-                                break;
-                            case 'pending':
-                                var statusHtml =
-                                    '<i class="fa fa-circle mr-2 text-yellow"></i>@lang("app.pending")';
-                                break;
-                            case 'resolved':
-                                var statusHtml =
-                                    '<i class="fa fa-circle mr-2 text-dark-green"></i>@lang("app.resolved")';
-                                break;
-                            case 'closed':
-                                var statusHtml =
-                                    '<i class="fa fa-circle mr-2 text-blue"></i>@lang("app.closed")';
-                                break;
+                        // switch (status) {
+                        //     case 'open':
+                        //         var statusHtml =
+                        //             '<i class="fa fa-circle mr-2 text-red"></i>@lang("app.open")';
+                        //         break;
+                        //     case 'pending':
+                        //         var statusHtml =
+                        //             '<i class="fa fa-circle mr-2 text-yellow"></i>@lang("app.pending")';
+                        //         break;
+                        //     case 'resolved':
+                        //         var statusHtml =
+                        //             '<i class="fa fa-circle mr-2 text-dark-green"></i>@lang("app.resolved")';
+                        //         break;
+                        //     case 'closed':
+                        //         var statusHtml =
+                        //             '<i class="fa fa-circle mr-2 text-blue"></i>@lang("app.closed")';
+                        //         break;
 
-                            default:
-                                var statusHtml =
-                                    '<i class="fa fa-circle mr-2 text-red"></i>@lang("app.open")';
-                                break;
-                        }
-                        $('#ticketStatusBadge').html(statusHtml);
+                        //     default:
+                        //         var statusHtml =
+                        //             '<i class="fa fa-circle mr-2 text-red"></i>@lang("app.open")';
+                        //         break;
+                        // }
+                        // $('#ticketStatusBadge').html(statusHtml);
                     }
                 }
             })

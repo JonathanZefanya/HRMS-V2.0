@@ -102,6 +102,7 @@
                             <option value="all">@lang('app.all')</option>
                             <option value="1">@lang('app.approved')</option>
                             <option value="0">@lang('app.pending')</option>
+                            <option value="3">@lang('app.rejected')</option>
                             <option value="2">@lang('app.active')</option>
                         </select>
                     </div>
@@ -145,6 +146,13 @@
                                           icon="plus">
                         @lang('modules.timeLogs.logTime')
                     </x-forms.link-primary>
+                @endif
+
+                @if(canDataTableExport())
+                <x-forms.button-secondary class="mr-3 float-left export-excel"
+                icon="file-export">
+                @lang('app.exportExcel')
+                </x-forms.button-secondary>
                 @endif
 
             </div>
@@ -393,6 +401,42 @@
             $.ajaxModal(MODAL_LG, url);
         });
 
+        $('body').on('click', '.revert-timelog-to-pending', function () {
+            const id = $(this).data('time-id');
+            let url = "{{ route('timelogs.revert_to_pending', ':id') }}";
+            url = url.replace(':id', id);
+            const token = '{{ csrf_token() }}';
+            
+            Swal.fire({
+                title: '@lang("messages.sweetAlertTitle")',
+                text: '@lang("messages.revertTimelogToPending")',
+                icon: 'warning',
+                showCancelButton: true,
+                focusConfirm: false,
+                confirmButtonText: '@lang("messages.confirm")',
+                cancelButtonText: '@lang("app.cancel")',
+                buttonsStyling: false,
+                customClass: {
+                    confirmButton: 'btn btn-primary mr-3',
+                    cancelButton: 'btn btn-secondary'
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    $.easyAjax({
+                        url: url,
+                        type: "POST",
+                        data: {
+                            id: id,
+                            _token: token
+                        },
+                        success: function (data) {
+                            showTable();
+                        }
+                    });
+                }
+            });
+        });
+
         const applyQuickAction = () => {
             const rowdIds = $("#timelogs-table input:checkbox:checked").map(function () {
                 return $(this).val();
@@ -418,6 +462,33 @@
                 }
             })
         };
+
+        
+        @if (canDataTableExport())
+            $('.export-excel').click(function() {
+                const dateRangePicker = $('#datatableRange').data('daterangepicker');
+
+                let startDate = $('#datatableRange').val();
+                let endDate;
+
+                if (startDate === '') {
+                    startDate = null;
+                    endDate = null;
+                } else {
+                    startDate = dateRangePicker.startDate.format('{{ company()->moment_date_format }}');
+                    endDate = dateRangePicker.endDate.format('{{ company()->moment_date_format }}');
+                }
+
+                var projectID = $('#project_id').val();
+                var employee = $('#employee').val();
+
+                var token = "{{ csrf_token() }}";
+                var url = "{{ route('timelogs.export_time_logs') }}";
+
+                window.location = url + '?startDate=' + encodeURIComponent(startDate) + '&endDate=' + encodeURIComponent(endDate) + '&projectID=' + projectID + '&employee=' + employee;
+            });
+        @endif
+
     </script>
 
     @if (!is_null(request('start')) && !is_null(request('end')))

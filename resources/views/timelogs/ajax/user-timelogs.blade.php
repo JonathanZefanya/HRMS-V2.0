@@ -63,10 +63,17 @@ $viewTimelogEarningPermission = user()->permission('view_timelog_earnings');
 
                                     @if (!is_null($item->end_time))
                                         @if ($editTimelogPermission == 'all' || ($editTimelogPermission == 'added' && user()->id == $item->added_by))
-                                            @if (!$item->approved)
+                                            @if (!$item->approved && !$item->rejected)
                                                 <a class="dropdown-item approve-timelog" href="javascript:;" data-time-id="{{ $item->id }}">
                                                     <i class="fa fa-check mr-2"></i>
                                                     @lang('app.approve')
+                                                </a>
+                                            @endif
+                                            
+                                            @if (($item->approved || $item->rejected) && $editTimelogPermission == 'all')
+                                                <a class="dropdown-item revert-timelog-to-pending" href="javascript:;" data-time-id="{{ $item->id }}">
+                                                    <i class="fa fa-undo mr-2"></i>
+                                                    @lang('app.revert_to_pending')
                                                 </a>
                                             @endif
                                         @endif

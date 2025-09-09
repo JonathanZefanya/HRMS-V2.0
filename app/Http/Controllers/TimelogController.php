@@ -11,6 +11,7 @@ use Carbon\CarbonInterval;
 use Illuminate\Http\Request;
 use App\Models\ProjectTimeLog;
 use App\Exports\EmployeeTimelogs;
+use App\Exports\ProjectTimeLogsExport;
 use Illuminate\Support\Facades\DB;
 use App\Models\ProjectTimeLogBreak;
 use Maatwebsite\Excel\Facades\Excel;
@@ -851,6 +852,25 @@ class TimelogController extends AccountBaseController
         return Reply::dataOnly(['status' => 'success']);
     }
 
+    public function revertTimelogToPending(Request $request)
+    {
+        $timelog = ProjectTimeLog::findOrFail($request->id);
+        
+        // Check if user has permission to approve timelogs
+        abort_403(user()->permission('approve_timelogs') !== 'all');
+        
+        // Reset approval status to pending
+        $timelog->approved = 0;
+        $timelog->approved_by = null;
+        $timelog->rejected = 0;
+        $timelog->rejected_by = null;
+        $timelog->rejected_at = null;
+        $timelog->reject_reason = null;
+        $timelog->save();
+
+        return Reply::dataOnly(['status' => 'success']);
+    }
+
     public function rejectTimelog(Request $request)
     {
         $this->reportingTo = EmployeeDetails::where('reporting_to', user()->id)->first();
@@ -1017,6 +1037,25 @@ class TimelogController extends AccountBaseController
         /** @phpstan-ignore-line */
 
         return view('timelogs.stopper-alert', ['timeLogg' => $timeLogged, 'timeLog' => $timeLogg]);
+    }
+
+    public function exportTimeLogs()
+    {
+        $startDate = request('startDate');
+        $endDate = request('endDate');
+        $employee = request('employee');
+
+        if ($employee == 'all') {
+            $employee = null;
+        }
+
+        if ($startDate == 'null' && $endDate == 'null') {
+            $startDate = Carbon::now()->startOfMonth()->toDateString();
+            $endDate = Carbon::now()->endOfMonth()->toDateString();
+        }
+
+
+        return Excel::download(new ProjectTimeLogsExport($startDate, $endDate, $employee), 'timelogs.xlsx');
     }
 
 }

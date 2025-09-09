@@ -190,7 +190,7 @@
                                     --
                                 @endif
                             </p>
- 
+
                         </div>
                     @endif
 
@@ -785,7 +785,10 @@
                 }
             });
 
-            $(".ajax-tab").click(function (event) {
+            // Remove existing event handlers to prevent duplicates
+            $('body').off('click', '.ajax-tab');
+
+            $('body').on('click', '.ajax-tab', function (event) {
                 event.preventDefault();
 
                 $('.task-tabs .ajax-tab').removeClass('active');
@@ -804,6 +807,8 @@
                     success: function (response) {
                         if (response.status == "success") {
                             $('#nav-tabContent').html(response.html);
+                            // Re-initialize components after content is loaded
+                            init(RIGHT_MODAL);
                         }
                     }
                 });
@@ -1055,7 +1060,10 @@
                 $.ajaxModal(MODAL_LG, url);
             });
 
-            $('#start-task-timer').click(function () {
+            // Remove existing event handlers to prevent duplicates
+            $('body').off('click', '#start-task-timer');
+
+            $('body').on('click', '#start-task-timer', function () {
                 var task_id = "{{ $task->id }}";
                 var project_id = "{{ $task->project_id }}";
                 var user_id = "{{ user()->id }}";
@@ -1145,7 +1153,10 @@
 
             init(RIGHT_MODAL);
 
-            $('#stop-task-timer').on('click', function () {
+            // Remove existing event handlers to prevent duplicates
+            $('body').off('click', '#stop-task-timer');
+
+            $('body').on('click', '#stop-task-timer', function () {
                 var url = "{{ route('timelogs.stopper_alert', ':id') }}?via=timelog";
                 var id = $(this).data('time-id');
                 url = url.replace(':id', id);

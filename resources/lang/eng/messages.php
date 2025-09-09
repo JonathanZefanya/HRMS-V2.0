@@ -102,6 +102,7 @@ return array(
     'sweetAlertTitle' => 'Are you sure?',
     'unArchiveMessage' => 'Do you want to restore this project.',
     'confirmRevert' => 'Yes, Restore it!',
+    'revertTimelogToPending' => 'Are you sure you want to revert this timelog to pending status?',
     'confirmNoArchive' => 'No, cancel please!',
     'confirmNo' => 'No, please!',
     'archiveMessage' => 'Do you want to archive this project.',

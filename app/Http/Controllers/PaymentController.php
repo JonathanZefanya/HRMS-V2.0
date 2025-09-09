@@ -460,7 +460,7 @@ class PaymentController extends AccountBaseController
 
         $pdf = app('dompdf.wrapper');
         $pdf->loadView('payments.ajax.pdf', $this->data);
-        $filename = __('app.menu.payments') . ' ' . $this->payment->id;
+        $filename = $this->payment->invoice->invoice_number  . '-' . __('app.menu.payment');
 
         return [
             'pdf' => $pdf,

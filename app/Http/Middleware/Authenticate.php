@@ -6,6 +6,7 @@ use Closure;
 use App\Models\User;
 use App\Models\Company;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Auth\Middleware\Authenticate as Middleware;
 
 class Authenticate extends Middleware
@@ -43,7 +44,7 @@ class Authenticate extends Middleware
 
             $company = Company::where('hash', $companyHashId)->first();
 
-            $qrEnable = \DB::table('attendance_settings')
+            $qrEnable = DB::table('attendance_settings')
                 ->where('company_id', $company->id)
                 ->value('qr_enable');
 
@@ -68,6 +69,12 @@ class Authenticate extends Middleware
         }
 
         $this->authenticate($request, $guards);
+
+        // Update user's last activity time after successful authentication
+        if (Auth::check()) {
+            $user = Auth::user();
+            $user->update(['last_activity' => now()]);
+        }
 
         return $next($request);
     }
